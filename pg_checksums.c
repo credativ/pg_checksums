@@ -50,7 +50,7 @@ static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 static void
 usage()
 {
-	printf(_("%s verifies of (de)activates page level checksums in offline PostgreSQL database cluster.\n\n"), progname);
+	printf(_("%s activates/deactivates/verifies page level checksums in offline PostgreSQL database cluster.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION] [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
