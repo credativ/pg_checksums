@@ -40,7 +40,6 @@ static int64 files = 0;
 static int64 blocks = 0;
 static int64 badblocks = 0;
 static ControlFileData *ControlFile;
-static ControlFileData ControlFile_new;
 
 static char *only_relfilenode = NULL;
 static bool debug = false;
@@ -533,19 +532,16 @@ main(int argc, char *argv[])
 
 	if (activate || deactivate)
 	{
-		/* Update pg_control */
-		memcpy(&ControlFile_new, ControlFile, sizeof(ControlFileData));
-
 		if (activate)
 		{
-			ControlFile_new.data_checksum_version = 1;
-			updateControlFile(DataDir, &ControlFile_new);
+			ControlFile->data_checksum_version = 1;
+			updateControlFile(DataDir, ControlFile);
 			printf(_("Checksums activated\n"));
 		}
 		else
 		{
-			ControlFile_new.data_checksum_version = 0;
-			updateControlFile(DataDir, &ControlFile_new);
+			ControlFile->data_checksum_version = 0;
+			updateControlFile(DataDir, ControlFile);
 			printf(_("Checksums deactivated\n"));
 		}
 
