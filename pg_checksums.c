@@ -173,11 +173,17 @@ scan_file(char *fn, int segmentno)
 
 			/* Seek back to beginning of block */
 			if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
+			{
 				fprintf(stderr, _("%s: seek failed: %ld\n"), progname, lseek(f, 0, SEEK_CUR));
+				exit(1);
+			}
 
 			/* Write block with checksum */
 			if (write(f, buf, BLCKSZ) == -1)
+			{
 				fprintf(stderr, _("%s: write failed: %s\n"), progname, strerror(errno));
+				exit(1);
+			}
 		}
 	}
 
