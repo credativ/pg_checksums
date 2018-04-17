@@ -13,7 +13,7 @@
 #include "postgres.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
-#if PG_VERSION_NUM >=  96000
+#if PG_VERSION_NUM >=  90600
 #include "common/controldata_utils.h"
 #endif
 #if PG_VERSION_NUM >= 110000
@@ -55,7 +55,7 @@ static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
 static void syncDataDir(char *DataDir, const char *argv0);
 #endif
-#if PG_VERSION_NUM < 960000
+#if PG_VERSION_NUM < 906000
 static ControlFileData *getControlFile(char *DataDir);
 #endif
 
@@ -522,7 +522,7 @@ main(int argc, char *argv[])
 		fprintf(stderr, _("%s: pg_control CRC value is incorrect.\n"), progname);
 		exit(1);
 	}
-#elif PG_VERSION_NUM >= 96000
+#elif PG_VERSION_NUM >= 90600
 	ControlFile = get_controlfile(DataDir, progname);
 #else
 	ControlFile = getControlFile(DataDir);
@@ -587,7 +587,7 @@ main(int argc, char *argv[])
 		/* Re-read pg_control */
 #if PG_VERSION_NUM >= 100000
 		ControlFile = get_controlfile(DataDir, progname, &crc_ok);
-#elif PG_VERSION_NUM >= 96000
+#elif PG_VERSION_NUM >= 90600
 		ControlFile = get_controlfile(DataDir, progname);
 #else
 		ControlFile = getControlFile(DataDir);
