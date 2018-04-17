@@ -38,6 +38,13 @@
 #define PG_CONTROL_FILE_SIZE PG_CONTROL_SIZE
 #endif
 
+#if PG_VERSION_NUM <  90500
+#define INIT_CRC32C INIT_CRC32
+#define COMP_CRC32C COMP_CRC32
+#define FIN_CRC32C FIN_CRC32
+#define INT64_MODIFIER "l"
+#endif
+
 static int64 files = 0;
 static int64 blocks = 0;
 static int64 badblocks = 0;
