@@ -13,7 +13,9 @@
 #include "postgres.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
+#if PG_VERSION_NUM >=  96000
 #include "common/controldata_utils.h"
+#endif
 #if PG_VERSION_NUM >= 110000
 #include "common/file_perm.h"
 #else
@@ -52,6 +54,9 @@ static const char *progname;
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
 static void syncDataDir(char *DataDir, const char *argv0);
+#endif
+#if PG_VERSION_NUM < 960000
+static ControlFileData *getControlFile(char *DataDir);
 #endif
 
 static void
@@ -248,6 +253,38 @@ scan_directory(char *basedir, char *subdir)
 			scan_directory(path, de->d_name);
 	}
 	closedir(dir);
+}
+
+/*
+ * Read in the control file.
+ */
+static ControlFileData *
+getControlFile(char *DataDir)
+{
+	ControlFileData *ControlFile;
+	int			fd;
+	char		ControlFilePath[MAXPGPATH];
+
+	ControlFile = palloc(sizeof(ControlFileData));
+	snprintf(ControlFilePath, MAXPGPATH, "%s/global/pg_control", DataDir);
+
+	if ((fd = open(ControlFilePath, O_RDONLY | PG_BINARY, 0)) == -1)
+	{
+		fprintf(stderr, _("%s: could not open file \"%s\" for reading: %s\n"),
+				progname, ControlFilePath, strerror(errno));
+		exit(1);
+	}
+
+	if (read(fd, ControlFile, sizeof(ControlFileData)) != sizeof(ControlFileData))
+	{
+		fprintf(stderr, _("%s: could not read file \"%s\": %s\n"),
+				progname, ControlFilePath, strerror(errno));
+		exit(1);
+	}
+
+	close(fd);
+
+	return ControlFile;
 }
 
 /*
@@ -485,8 +522,10 @@ main(int argc, char *argv[])
 		fprintf(stderr, _("%s: pg_control CRC value is incorrect.\n"), progname);
 		exit(1);
 	}
-#else
+#elif PG_VERSION_NUM >= 96000
 	ControlFile = get_controlfile(DataDir, progname);
+#else
+	ControlFile = getControlFile(DataDir);
 #endif
 
 	if (ControlFile->state != DB_SHUTDOWNED &&
@@ -548,8 +587,10 @@ main(int argc, char *argv[])
 		/* Re-read pg_control */
 #if PG_VERSION_NUM >= 100000
 		ControlFile = get_controlfile(DataDir, progname, &crc_ok);
-#else
+#elif PG_VERSION_NUM >= 96000
 		ControlFile = get_controlfile(DataDir, progname);
+#else
+		ControlFile = getControlFile(DataDir);
 #endif
 	}
 
