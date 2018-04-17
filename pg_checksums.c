@@ -521,6 +521,14 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/* Disallow execution by the root user */
+	if (geteuid() == 0)
+	{
+		fprintf(stderr, _("%s: cannot be executed by \"root\"\n"),
+				progname);
+		exit(1);
+	}
+
 	/* Check if cluster is running */
 #if PG_VERSION_NUM >= 100000
 	ControlFile = get_controlfile(DataDir, progname, &crc_ok);
