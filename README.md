@@ -9,3 +9,5 @@ large database.
 
 The database cluster needs to be shutdown cleanly in order for the program to
 operate.
+
+PostgreSQL versions since 9.3 are supported.
