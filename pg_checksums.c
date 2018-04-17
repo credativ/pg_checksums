@@ -14,12 +14,14 @@
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
 #include "common/controldata_utils.h"
-#if PG_VERSION_NUM > 110000
+#if PG_VERSION_NUM >= 110000
 #include "common/file_perm.h"
 #else
 #define pg_file_create_mode 0600
 #endif
+#if PG_VERSION_NUM >= 100000
 #include "common/file_utils.h"
+#endif
 #include "storage/bufpage.h"
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
@@ -30,6 +32,9 @@
 
 #include "pg_getopt.h"
 
+#if PG_VERSION_NUM < 100000
+#define PG_CONTROL_FILE_SIZE PG_CONTROL_SIZE
+#endif
 
 static int64 files = 0;
 static int64 blocks = 0;
@@ -46,6 +51,9 @@ static bool deactivate = false;
 static const char *progname;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
+#if PG_VERSION_NUM < 100000
+static void syncDataDir(char *DataDir, const char *argv0);
+#endif
 
 static void
 usage()
@@ -257,8 +265,10 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 	 * For good luck, apply the same static assertions as in backend's
 	 * WriteControlFile().
 	 */
+#if PG_VERSION_NUM >= 100000
 	StaticAssertStmt(sizeof(ControlFileData) <= PG_CONTROL_MAX_SAFE_SIZE,
 					 "pg_control is too large for atomic disk writes");
+#endif
 	StaticAssertStmt(sizeof(ControlFileData) <= PG_CONTROL_FILE_SIZE,
 					 "sizeof(ControlFileData) exceeds PG_CONTROL_FILE_SIZE");
 
@@ -318,12 +328,68 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 	}
 }
 
+/*
+ * Sync target data directory to ensure that modifications are safely on disk.
+ *
+ * We do this once, for the whole data directory, for performance reasons.  At
+ * the end of pg_rewind's run, the kernel is likely to already have flushed
+ * most dirty buffers to disk. Additionally initdb -S uses a two-pass approach
+ * (only initiating writeback in the first pass), which often reduces the
+ * overall amount of IO noticeably.
+ */
+static void
+syncDataDir(char *DataDir, const char *argv0)
+{
+	int			ret;
+#define MAXCMDLEN (2 * MAXPGPATH)
+	char		exec_path[MAXPGPATH];
+	char		cmd[MAXCMDLEN];
+
+	/* locate initdb binary */
+	if ((ret = find_other_exec(argv0, "initdb",
+							   "initdb (PostgreSQL) " PG_VERSION "\n",
+							   exec_path)) < 0)
+	{
+		char		full_path[MAXPGPATH];
+
+		if (find_my_exec(argv0, full_path) < 0)
+			strlcpy(full_path, progname, sizeof(full_path));
+
+		if (ret == -1)
+		{
+			fprintf(stderr, _("%s: program \"initdb\" not found\n"), progname);
+			exit(1);
+		}
+		else
+		{
+			fprintf(stderr, _("%s: program \"initdb\" has different version\n"),	progname);
+			exit(1);
+		}
+	}
+
+	/* finally run initdb -S */
+	if (debug)
+		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S",
+				 exec_path, DataDir);
+	else
+		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S > \"%s\"",
+				 exec_path, DataDir, DEVNULL);
+
+	if (system(cmd) != 0)
+	{
+		fprintf(stderr, _("%s: sync of target directory failed\n"), progname);
+		exit(1);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
 	char	   *DataDir = NULL;
 	int			c;
+#if PG_VERSION_NUM >= 100000
 	bool		crc_ok;
+#endif
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
 
@@ -413,12 +479,16 @@ main(int argc, char *argv[])
 	}
 
 	/* Check if cluster is running */
+#if PG_VERSION_NUM >= 100000
 	ControlFile = get_controlfile(DataDir, progname, &crc_ok);
 	if (!crc_ok)
 	{
 		fprintf(stderr, _("%s: pg_control CRC value is incorrect.\n"), progname);
 		exit(1);
 	}
+#else
+	ControlFile = get_controlfile(DataDir, progname);
+#endif
 
 	if (ControlFile->state != DB_SHUTDOWNED &&
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
@@ -451,7 +521,14 @@ main(int argc, char *argv[])
 		if (verify)
 			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
 		else
+		{
+			printf(_("Syncing data directory\n"));
+#if PG_VERSION_NUM >= 100000
 			fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
+#else
+			syncDataDir(DataDir, argv[0]);
+#endif
+		}
 	}
 
 	if (activate || deactivate)
@@ -473,7 +550,11 @@ main(int argc, char *argv[])
 		}
 
 		/* Re-read pg_control */
+#if PG_VERSION_NUM >= 100000
 		ControlFile = get_controlfile(DataDir, progname, &crc_ok);
+#else
+		ControlFile = get_controlfile(DataDir, progname);
+#endif
 	}
 
 	printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
