@@ -84,7 +84,7 @@ usage()
 	printf(_("\nOne of -a, -b or -c is mandatory. If no data directory "
 			 "(DATADIR) is specified,\nthe environment variable "
 			 "PGDATA is used.\n\n"));
-	printf(_("Report bugs to <pgsql-bugs@postgresql.org>.\n"));
+	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
 }
 
 static const char *skip[] = {
