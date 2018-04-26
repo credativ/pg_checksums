@@ -62,7 +62,7 @@ static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
 static void syncDataDir(char *DataDir, const char *argv0);
 #endif
-#if PG_VERSION_NUM < 906000
+#if PG_VERSION_NUM < 90600
 static ControlFileData *getControlFile(char *DataDir);
 #endif
 
@@ -269,6 +269,13 @@ scan_directory(char *basedir, char *subdir)
 }
 
 /*
+ * getControlFile() needs our own implementation in
+ * PostgreSQL versiones below 9.6. If built against newer version,
+ * use the get_controlfile() function provided there.
+ */
+#if PG_VERSION_NUM < 90600
+
+/*
  * Read in the control file.
  */
 static ControlFileData *
@@ -299,6 +306,8 @@ getControlFile(char *DataDir)
 
 	return ControlFile;
 }
+
+#endif
 
 /*
  * Update the control file.
@@ -378,6 +387,11 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 }
 
 /*
+ * syncDataDir() is used on PostgreSQL releases <= 10, only
+ */
+#if PG_VERSION_NUM < 100000
+
+/*
  * Sync target data directory to ensure that modifications are safely on disk.
  *
  * We do this once, for the whole data directory, for performance reasons.  At
@@ -430,6 +444,8 @@ syncDataDir(char *DataDir, const char *argv0)
 		exit(1);
 	}
 }
+
+#endif
 
 int
 main(int argc, char *argv[])
