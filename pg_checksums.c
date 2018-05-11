@@ -32,7 +32,13 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#if PG_VERSION_NUM <  90400
+#include <unistd.h>
+#include <getopt.h>
+extern char *optarg;
+#else
 #include "pg_getopt.h"
+#endif
 
 #if PG_VERSION_NUM < 100000
 #define PG_CONTROL_FILE_SIZE PG_CONTROL_SIZE
