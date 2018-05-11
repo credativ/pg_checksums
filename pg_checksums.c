@@ -97,6 +97,7 @@ static const char *skip[] = {
 	"pg_control",
 	"pg_filenode.map",
 	"pg_internal.init",
+	"pg_stat_statements.stat",
 	"PG_VERSION",
 	NULL,
 };
