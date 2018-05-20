@@ -14,12 +14,14 @@ PGAPPICON=win32
 
 
 OBJS= pg_checksums.o $(WIN32RES)
-PG_LIBS = $(libpq_pgport)
 EXTRA_CLEAN = tmp_check
 
 PG_CONFIG ?= pg_config
 PGXS = $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+
+# avoid linking against all libs that the server links against (xml, selinux, ...)
+LIBS = $(libpq_pgport)
 
 all: pg_checksums
 
