@@ -66,7 +66,11 @@ static const char *progname;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
-static void syncDataDir(char *DataDir, const char *argv0);
+#define MAXCMDLEN (2 * MAXPGPATH)
+char initdb_path[MAXPGPATH];
+
+static void findInitDB(const char *argv0);
+static void syncDataDir(char *DataDir);
 #endif
 #if PG_VERSION_NUM < 90600
 static ControlFileData *getControlFile(char *DataDir);
@@ -398,27 +402,13 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
  */
 #if PG_VERSION_NUM < 100000
 
-/*
- * Sync target data directory to ensure that modifications are safely on disk.
- *
- * We do this once, for the whole data directory, for performance reasons.  At
- * the end of pg_rewind's run, the kernel is likely to already have flushed
- * most dirty buffers to disk. Additionally initdb -S uses a two-pass approach
- * (only initiating writeback in the first pass), which often reduces the
- * overall amount of IO noticeably.
- */
-static void
-syncDataDir(char *DataDir, const char *argv0)
+static void findInitDB(const char *argv0)
 {
-	int			ret;
-#define MAXCMDLEN (2 * MAXPGPATH)
-	char		exec_path[MAXPGPATH];
-	char		cmd[MAXCMDLEN];
-
+	int	ret;
 	/* locate initdb binary */
 	if ((ret = find_other_exec(argv0, "initdb",
 							   "initdb (PostgreSQL) " PG_VERSION "\n",
-							   exec_path)) < 0)
+							   initdb_path)) < 0)
 	{
 		char		full_path[MAXPGPATH];
 
@@ -437,13 +427,31 @@ syncDataDir(char *DataDir, const char *argv0)
 		}
 	}
 
+}
+
+/*
+ * Sync target data directory to ensure that modifications are safely on disk.
+ *
+ * We do this once, for the whole data directory, for performance reasons.  At
+ * the end of pg_rewind's run, the kernel is likely to already have flushed
+ * most dirty buffers to disk. Additionally initdb -S uses a two-pass approach
+ * (only initiating writeback in the first pass), which often reduces the
+ * overall amount of IO noticeably.
+ */
+static void
+syncDataDir(char *DataDir)
+{
+	int			ret;
+	char		cmd[MAXCMDLEN];
+
+
 	/* finally run initdb -S */
 	if (debug)
 		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S",
-				 exec_path, DataDir);
+				 initdb_path, DataDir);
 	else
 		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S > \"%s\"",
-				 exec_path, DataDir, DEVNULL);
+				 initdb_path, DataDir, DEVNULL);
 
 	if (system(cmd) != 0)
 	{
@@ -592,6 +600,10 @@ main(int argc, char *argv[])
 	}
 
 	if (activate || verify)
+#if PG_VERSION_NUM < 100000
+		// check for initdb
+		findInitDB(argv[0]);
+#endif
 	{
 		/* Scan all files */
 		scan_directory(DataDir, "global");
@@ -608,7 +620,7 @@ main(int argc, char *argv[])
 #if PG_VERSION_NUM >= 100000
 			fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
 #else
-			syncDataDir(DataDir, argv[0]);
+			syncDataDir(DataDir);
 #endif
 		}
 	}
