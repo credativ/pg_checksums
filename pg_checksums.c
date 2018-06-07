@@ -441,7 +441,6 @@ static void findInitDB(const char *argv0)
 static void
 syncDataDir(char *DataDir)
 {
-	int			ret;
 	char		cmd[MAXCMDLEN];
 
 
