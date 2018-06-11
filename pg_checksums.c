@@ -601,7 +601,8 @@ main(int argc, char *argv[])
 	if (activate || verify)
 #if PG_VERSION_NUM < 100000
 		// check for initdb
-		findInitDB(argv[0]);
+		if (activate)
+			findInitDB(argv[0]);
 #endif
 	{
 		/* Scan all files */
