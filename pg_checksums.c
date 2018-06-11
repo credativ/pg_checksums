@@ -398,7 +398,7 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 }
 
 /*
- * syncDataDir() is used on PostgreSQL releases <= 10, only
+ * syncDataDir() and findInitDB are used on PostgreSQL releases < 10, only
  */
 #if PG_VERSION_NUM < 100000
 
