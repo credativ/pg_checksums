@@ -24,8 +24,8 @@ my $pgdata = $node->data_dir;
 $node->command_fails(['pg_checksums', '-c'],
         'pg_checksums needs needs target directory specified');
 
-$node->command_fails(['pg_checksums', '-c', '-D', $pgdata],
-        'pg_checksums needs to run against offfline cluster');
+$node->command_fails(['pg_checksums', '-a', '-D', $pgdata],
+        'pg_checksums -a needs to run against offfline cluster');
 
 my $checksum = $node->safe_psql('postgres', 'SHOW data_checksums;');
 is($checksum, 'off', 'checksums are disabled');
