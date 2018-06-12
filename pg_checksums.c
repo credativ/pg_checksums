@@ -599,12 +599,12 @@ main(int argc, char *argv[])
 	}
 
 	if (activate || verify)
+	{
 #if PG_VERSION_NUM < 100000
-		// check for initdb
+		/* Check for initdb */
 		if (activate)
 			findInitDB(argv[0]);
 #endif
-	{
 		/* Scan all files */
 		scan_directory(DataDir, "global");
 		scan_directory(DataDir, "base");
