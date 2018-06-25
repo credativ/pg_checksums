@@ -679,6 +679,10 @@ main(int argc, char *argv[])
 	ControlFile = getControlFile(DataDir);
 #endif
 
+	/*
+	 * Cluster must be shut down for activation/deactivation of checksums,
+	 * but online verification is supported.
+	 */
 	if (ControlFile->state != DB_SHUTDOWNED &&
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY &&
 		!verify)
