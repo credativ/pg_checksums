@@ -258,8 +258,8 @@ scan_file(char *fn, int segmentno)
 				badblocks++;
 			}
 			else if (block_retry)
-					fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
-							progname, blockno, fn);
+				fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
+						progname, blockno, fn);
 
 			block_retry = false;
 		}
