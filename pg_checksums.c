@@ -158,6 +158,14 @@ scan_file(char *fn, int segmentno)
 
 		if (r != BLCKSZ)
 		{
+			if (block_retry)
+			{
+				/* We already tried once to reread the block, bail out */
+				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
+								progname, blockno, fn, r);
+				exit(1);
+			}
+
 			if (debug)
 				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
 						progname, blockno, fn, r);
