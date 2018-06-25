@@ -177,7 +177,10 @@ scan_file(char *fn, int segmentno)
 			 * beginning of the failed block
 			 */
 			if (lseek(f, -r, SEEK_CUR) == -1)
+			{
 				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
+				exit(1);
+			}
 
 			/* Set flag so we know a retry was attempted */
 			block_retry = true;
@@ -220,7 +223,10 @@ scan_file(char *fn, int segmentno)
 
 					/* Seek to the beginning of the failed block */
 					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
+					{
 						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
+						exit(1);
+					}
 
 					/* Set flag so we know a retry was attempted */
 					block_retry = true;
