@@ -147,12 +147,13 @@ scan_file(char *fn, int segmentno)
 
 		if (debug && block_retry)
 			fprintf(stderr, _("%s: retrying block %d in file \"%s\"\n"),
-                                        progname, blockno, fn);
+					progname, blockno, fn);
 
 		if (r == 0)
 		{
 			if (debug && block_retry)
-				fprintf(stderr, _("%s: block %d in file \"%s\" is EOF, ignoring\n"), progname, blockno, fn);
+				fprintf(stderr, _("%s: block %d in file \"%s\" is EOF, ignoring\n"),
+						progname, blockno, fn);
 			break;
 		}
 
@@ -162,7 +163,7 @@ scan_file(char *fn, int segmentno)
 			{
 				/* We already tried once to reread the block, bail out */
 				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
-								progname, blockno, fn, r);
+						progname, blockno, fn, r);
 				exit(1);
 			}
 
@@ -186,7 +187,8 @@ scan_file(char *fn, int segmentno)
 			 */
 			if (lseek(f, -r, SEEK_CUR) == -1)
 			{
-				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
+				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+						progname, fn);
 				exit(1);
 			}
 
@@ -232,7 +234,8 @@ scan_file(char *fn, int segmentno)
 					/* Seek to the beginning of the failed block */
 					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
 					{
-						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
+						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+								progname, fn);
 						exit(1);
 					}
 
@@ -254,12 +257,9 @@ scan_file(char *fn, int segmentno)
 							progname, fn, blockno, csum, header->pd_checksum);
 				badblocks++;
 			}
-			else
-			{
-				if (block_retry)
+			else if (block_retry)
 					fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
 							progname, blockno, fn);
-			}
 
 			block_retry = false;
 		}
@@ -287,7 +287,6 @@ scan_file(char *fn, int segmentno)
 				exit(1);
 			}
 		}
-
 	}
 
 	close(f);
