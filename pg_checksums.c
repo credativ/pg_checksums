@@ -165,7 +165,6 @@ scan_file(char *fn, int segmentno)
 			if (csum != header->pd_checksum)
 			{
 				/*
-
 				 * Retry the block on the first failure.  It's
 				 * possible that we read the first 4K page of
 				 * the block just before postgres updated the
