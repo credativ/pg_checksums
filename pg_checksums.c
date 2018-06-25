@@ -103,6 +103,7 @@ static const char *skip[] = {
 	"pg_internal.init",
 	"pg_stat_statements.stat",
 	"PG_VERSION",
+	"pgsql_tmp",
 	NULL,
 };
 
@@ -144,19 +145,59 @@ scan_file(char *fn, int segmentno)
 		uint16		csum;
 		int			r = read(f, buf, BLCKSZ);
 
+		if (debug && block_retry)
+			fprintf(stderr, _("%s: retrying block %d in file \"%s\"\n"),
+                                        progname, blockno, fn);
+
 		if (r == 0)
+		{
+			if (debug && block_retry)
+				fprintf(stderr, _("%s: block %d in file \"%s\" is EOF, ignoring\n"), progname, blockno, fn);
 			break;
+		}
+
 		if (r != BLCKSZ)
 		{
-			fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
-					progname, blockno, fn, r);
-			exit(1);
+			if (debug)
+				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
+						progname, blockno, fn, r);
+
+			/*
+			 * Retry the block. It's possible that we read the
+			 * block while it was extended or shrinked, so it it
+			 * ends up looking torn to us. If there were less than
+			 * 10 bad blocks so far, we wait for 500ms before we
+			 * retry.
+			 */
+			if (badblocks < 10)
+				pg_usleep(500);
+
+			/*
+			 * Seek back by the amount of bytes we read to the
+			 * beginning of the failed block
+			 */
+			if (lseek(f, -r, SEEK_CUR) == -1)
+				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
+
+			/* Set flag so we know a retry was attempted */
+			block_retry = true;
+
+			/* Reset loop to validate the block again */
+			blockno--;
+
+			continue;
 		}
 		blocks++;
 
 		/* New pages have no checksum yet */
 		if (verify && PageIsNew(buf))
+		{
+			if (debug && block_retry)
+				fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
+						progname, blockno, fn);
+			block_retry = false;
 			continue;
+		}
 
 		csum = pg_checksum_page(buf, blockno + segmentno * RELSEG_SIZE);
 
@@ -170,28 +211,27 @@ scan_file(char *fn, int segmentno)
 				 * the block just before postgres updated the
 				 * entire block so it ends up looking torn to
 				 * us. If there were less than 10 bad blocks so
-				 * far, we wait for 100ms before we retry.
+				 * far, we wait for 500ms before we retry.
 				 */
 				if (block_retry == false)
 				{
 					if (badblocks < 10)
-						pg_usleep(100);
+						pg_usleep(500);
 
-					/* Reread the failed block */
+					/* Seek to the beginning of the failed block */
 					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
-						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
-
-					if (read(f, buf, BLCKSZ) != BLCKSZ)
-						fprintf(stderr, _("%s: could not reread block %d of file \"%s\": %m\n"), progname, blockno, fn);
-
-					if (lseek(f, BLCKSZ, SEEK_CUR) == -1)
 						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"), progname, fn);
 
 					/* Set flag so we know a retry was attempted */
 					block_retry = true;
 
+					if (debug)
+						fprintf(stderr, _("%s: checksum verification failed on first attempt in file \"%s\", block %d: calculated checksum %X but expected %X\n"),
+								progname, fn, blockno, csum, header->pd_checksum);
+
 					/* Reset loop to validate the block again */
 					blockno--;
+
 					continue;
 				}
 
@@ -202,9 +242,6 @@ scan_file(char *fn, int segmentno)
 			}
 			else
 			{
-				if (debug)
-					fprintf(stderr, _("%s: checksum verified in file \"%s\", block %d: %X\n"),
-							progname, fn, blockno, csum);
 				if (block_retry)
 					fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
 							progname, blockno, fn);
@@ -236,6 +273,7 @@ scan_file(char *fn, int segmentno)
 				exit(1);
 			}
 		}
+
 	}
 
 	close(f);
@@ -267,6 +305,15 @@ scan_directory(char *basedir, char *subdir)
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
 		if (lstat(fn, &st) < 0)
 		{
+			if (errno == ENOENT)
+			{
+				/* File was removed in the meantime */
+				if (debug)
+					fprintf(stderr, _("%s: ignoring deleted file \"%s\"\n"),
+							progname, fn);
+				continue;
+			}
+
 			fprintf(stderr, _("%s: could not stat file \"%s\": %m\n"),
 					progname, fn);
 			exit(1);
