@@ -6,7 +6,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 19;
+use Test::More tests => 20;
 
 program_help_ok('pg_checksums');
 program_version_ok('pg_checksums');
@@ -56,6 +56,9 @@ $node->command_ok(['pg_checksums', '-a', '-D', $pgdata],
         'pg_checksums are again activated in offline cluster');
 
 $node->start;
+
+$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
+        'pg_checksums can be verified in online cluster');
 
 # create table to corrupt and get their relfilenode
 my $file_corrupt = $node->safe_psql('postgres',
