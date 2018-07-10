@@ -1,7 +1,7 @@
 /*
  * pg_checksums
  *
- * Activate/deactivate/verify data checksums in an offline cluster
+ * Activate/deactivate/verify data checksums
  *
  *	Copyright (c) 2010-2018, PostgreSQL Global Development Group
  *
@@ -79,7 +79,7 @@ static ControlFileData *getControlFile(char *DataDir);
 static void
 usage()
 {
-	printf(_("%s activates/deactivates/verifies page level checksums in offline PostgreSQL database cluster.\n\n"), progname);
+	printf(_("%s activates/deactivates/verifies page level checksums in PostgreSQL database cluster.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION] [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
@@ -103,6 +103,7 @@ static const char *skip[] = {
 	"pg_internal.init",
 	"pg_stat_statements.stat",
 	"PG_VERSION",
+	"pgsql_tmp",
 	NULL,
 };
 
@@ -128,6 +129,7 @@ scan_file(char *fn, int segmentno)
 	PageHeader	header = (PageHeader) buf;
 	int			f;
 	int			blockno;
+	bool		block_retry = false;
 
 	f = open(fn, O_RDWR);
 	if (f < 0)
@@ -143,19 +145,72 @@ scan_file(char *fn, int segmentno)
 		uint16		csum;
 		int			r = read(f, buf, BLCKSZ);
 
+		if (debug && block_retry)
+			fprintf(stderr, _("%s: retrying block %d in file \"%s\"\n"),
+					progname, blockno, fn);
+
 		if (r == 0)
+		{
+			if (debug && block_retry)
+				fprintf(stderr, _("%s: block %d in file \"%s\" is EOF, ignoring\n"),
+						progname, blockno, fn);
 			break;
+		}
+
 		if (r != BLCKSZ)
 		{
-			fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
-					progname, blockno, fn, r);
-			exit(1);
+			if (block_retry)
+			{
+				/* We already tried once to reread the block, bail out */
+				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
+						progname, blockno, fn, r);
+				exit(1);
+			}
+
+			if (debug)
+				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
+						progname, blockno, fn, r);
+
+			/*
+			 * Retry the block. It's possible that we read the
+			 * block while it was extended or shrinked, so it it
+			 * ends up looking torn to us. If there were less than
+			 * 10 bad blocks so far, we wait for 500ms before we
+			 * retry.
+			 */
+			if (badblocks < 10)
+				pg_usleep(500);
+
+			/*
+			 * Seek back by the amount of bytes we read to the
+			 * beginning of the failed block
+			 */
+			if (lseek(f, -r, SEEK_CUR) == -1)
+			{
+				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+						progname, fn);
+				exit(1);
+			}
+
+			/* Set flag so we know a retry was attempted */
+			block_retry = true;
+
+			/* Reset loop to validate the block again */
+			blockno--;
+
+			continue;
 		}
 		blocks++;
 
 		/* New pages have no checksum yet */
 		if (verify && PageIsNew(buf))
+		{
+			if (debug && block_retry)
+				fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
+						progname, blockno, fn);
+			block_retry = false;
 			continue;
+		}
 
 		csum = pg_checksum_page(buf, blockno + segmentno * RELSEG_SIZE);
 
@@ -163,14 +218,50 @@ scan_file(char *fn, int segmentno)
 		{
 			if (csum != header->pd_checksum)
 			{
+				/*
+				 * Retry the block on the first failure.  It's
+				 * possible that we read the first 4K page of
+				 * the block just before postgres updated the
+				 * entire block so it ends up looking torn to
+				 * us. If there were less than 10 bad blocks so
+				 * far, we wait for 500ms before we retry.
+				 */
+				if (block_retry == false)
+				{
+					if (badblocks < 10)
+						pg_usleep(500);
+
+					/* Seek to the beginning of the failed block */
+					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
+					{
+						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+								progname, fn);
+						exit(1);
+					}
+
+					/* Set flag so we know a retry was attempted */
+					block_retry = true;
+
+					if (debug)
+						fprintf(stderr, _("%s: checksum verification failed on first attempt in file \"%s\", block %d: calculated checksum %X but expected %X\n"),
+								progname, fn, blockno, csum, header->pd_checksum);
+
+					/* Reset loop to validate the block again */
+					blockno--;
+
+					continue;
+				}
+
 				if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION)
 					fprintf(stderr, _("%s: checksum verification failed in file \"%s\", block %d: calculated checksum %X but expected %X\n"),
 							progname, fn, blockno, csum, header->pd_checksum);
 				badblocks++;
 			}
-			else if (debug)
-				fprintf(stderr, _("%s: checksum verified in file \"%s\", block %d: %X\n"),
-						progname, fn, blockno, csum);
+			else if (block_retry)
+				fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
+						progname, blockno, fn);
+
+			block_retry = false;
 		}
 		else
 		if (activate)
@@ -227,6 +318,15 @@ scan_directory(char *basedir, char *subdir)
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
 		if (lstat(fn, &st) < 0)
 		{
+			if (errno == ENOENT)
+			{
+				/* File was removed in the meantime */
+				if (debug)
+					fprintf(stderr, _("%s: ignoring deleted file \"%s\"\n"),
+							progname, fn);
+				continue;
+			}
+
 			fprintf(stderr, _("%s: could not stat file \"%s\": %m\n"),
 					progname, fn);
 			exit(1);
@@ -579,8 +679,13 @@ main(int argc, char *argv[])
 	ControlFile = getControlFile(DataDir);
 #endif
 
+	/*
+	 * Cluster must be shut down for activation/deactivation of checksums,
+	 * but online verification is supported.
+	 */
 	if (ControlFile->state != DB_SHUTDOWNED &&
-		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
+		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY &&
+		!verify)
 	{
 		fprintf(stderr, _("%s: cluster must be shut down.\n"), progname);
 		exit(1);
