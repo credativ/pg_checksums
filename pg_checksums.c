@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <signal.h>
 #include <time.h>
 
 #if PG_VERSION_NUM <  90400
@@ -116,6 +117,17 @@ static const char *skip[] = {
 	"pgsql_tmp",
 	NULL,
 };
+
+static void enable_progress_report(int signo,
+								   siginfo_t *siginfo,
+								   void *context) {
+
+	/* we handle SIGUSR1 only */
+	if (signo == SIGUSR1) {
+		show_progress = true;
+	}
+
+}
 
 /*
  * Report current progress status. Parts borrowed from
@@ -641,6 +653,8 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 #endif
 
+	struct sigaction act; /* to turn progress status info on */
+
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
 
 	progname = get_progname(argv[0]);
@@ -784,6 +798,24 @@ main(int argc, char *argv[])
 		if (activate)
 			findInitDB(argv[0]);
 #endif
+		/*
+		 * Assign SIGUSR1 signal handler to turn progress
+		 * status information on in case someone has
+		 * forgotten -P (and doesn't want to restart)...
+		 */
+		memset(&act, '\0', sizeof(act));
+		act.sa_sigaction = &enable_progress_report;
+		act.sa_flags  = SA_SIGINFO;
+
+		/*
+		 * Enable signaler handler, but don't treat it as
+		 * severe if we don't succeed here. Just give a
+		 * message on STDERR.
+		 */
+		if (sigaction(SIGUSR1, &act, NULL) < 0) {
+			fprintf(stderr, "could not set signal handler to turn on progress bar\n");
+		}
+
 		/*
 		 * Iff progress status information is requested, we need
 		 * to scan the directory tree(s) twice, once to get the idea
