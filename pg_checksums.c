@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <time.h>
 
 #if PG_VERSION_NUM <  90400
 #include <unistd.h>
@@ -61,8 +62,16 @@ static bool debug = false;
 static bool verify = false;
 static bool activate = false;
 static bool deactivate = false;
+static bool show_progress = false;
 
 static const char *progname;
+
+/*
+ * Progress status information.
+ */
+int64 totalsize = 0;
+int64 current_size = 0;
+pg_time_t last_progress_update;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
@@ -89,6 +98,7 @@ usage()
 	printf(_("  -c,            verify checksums\n"));
 	printf(_("  -r relfilenode check only relation with specified relfilenode\n"));
 	printf(_("  -d             debug output\n"));
+	printf(_("  -P             show progress information\n"));
 	printf(_("  -V, --version  output version information, then exit\n"));
 	printf(_("  -?, --help     show this help, then exit\n"));
 	printf(_("\nOne of -a, -b or -c is mandatory. If no data directory "
@@ -107,6 +117,52 @@ static const char *skip[] = {
 	NULL,
 };
 
+/*
+ * Report current progress status. Parts borrowed from
+ * PostgreSQLs' src/bin/pg_basebackup.c
+ */
+static void report_progress(bool force)
+{
+	pg_time_t now = time(NULL);
+	int total_percent = 0;
+
+	char totalstr[32];
+	char currentstr[32];
+
+	/* Make sure we just report at least once a second */
+	if ((now == last_progress_update) && !force)
+		return;
+
+	/* Save current time */
+	last_progress_update = now;
+
+	/*
+	 * Calculate current percent done, based on
+	 * KiB...
+	 */
+	total_percent = totalsize ? (int64) ((current_size / 1024) * 100 / (totalsize / 1024)) : 0;
+
+	/* Don't display larger than 100% */
+	if (total_percent > 100)
+		total_percent = 100;
+
+	/* The same for total size */
+	if (current_size > totalsize)
+		totalsize = current_size / 1024;
+
+	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
+			 totalsize);
+	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
+			 current_size);
+	fprintf(stderr, "%s/%s (%d%%)",
+			currentstr, totalstr, total_percent);
+
+	if (isatty(fileno(stderr)))
+		fprintf(stderr, "\r");
+	else
+		fprintf(stderr, "\n");
+}
+
 static bool
 skipfile(char *fn)
 {
@@ -123,7 +179,7 @@ skipfile(char *fn)
 }
 
 static void
-scan_file(char *fn, int segmentno)
+scan_file(char *fn, int segmentno, bool sizeonly)
 {
 	char		buf[BLCKSZ];
 	PageHeader	header = (PageHeader) buf;
@@ -213,6 +269,7 @@ scan_file(char *fn, int segmentno)
 		}
 
 		csum = pg_checksum_page(buf, blockno + segmentno * RELSEG_SIZE);
+		current_size += r;
 
 		if (verify)
 		{
@@ -248,6 +305,7 @@ scan_file(char *fn, int segmentno)
 
 					/* Reset loop to validate the block again */
 					blockno--;
+					current_size -= r;
 
 					continue;
 				}
@@ -262,6 +320,9 @@ scan_file(char *fn, int segmentno)
 						progname, blockno, fn);
 
 			block_retry = false;
+
+			if (show_progress)
+				report_progress(false);
 		}
 		else
 		if (activate)
@@ -286,17 +347,21 @@ scan_file(char *fn, int segmentno)
 				fprintf(stderr, _("%s: write failed: %s\n"), progname, strerror(errno));
 				exit(1);
 			}
+
+			if (show_progress)
+				report_progress(false);
 		}
 	}
 
 	close(f);
 }
 
-static void
-scan_directory(char *basedir, char *subdir)
+static int64
+scan_directory(char *basedir, char *subdir, bool sizeonly)
 {
-	char		path[MAXPGPATH];
-	DIR		   *dir;
+	int64          dirsize = 0;
+	char		   path[MAXPGPATH];
+	DIR		      *dir;
 	struct dirent *de;
 
 	snprintf(path, sizeof(path), "%s/%s", basedir, subdir);
@@ -367,16 +432,22 @@ scan_directory(char *basedir, char *subdir)
 			if (debug && activate)
 				fprintf(stderr, _("%s: activate checksum in file \"%s\"\n"), progname, fn);
 
-			scan_file(fn, segmentno);
+			dirsize += st.st_size;
+
+			if (!sizeonly)
+			{
+				scan_file(fn, segmentno, sizeonly);
+			}
 		}
 #ifndef WIN32
 		else if (S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
 #else
 		else if (S_ISDIR(st.st_mode) || pgwin32_is_junction(fn))
 #endif
-			scan_directory(path, de->d_name);
+			dirsize += scan_directory(path, de->d_name, sizeonly);
 	}
 	closedir(dir);
+	return dirsize;
 }
 
 /*
@@ -588,7 +659,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt(argc, argv, "D:abcr:d")) != -1)
+	while ((c = getopt(argc, argv, "D:abcr:dP")) != -1)
 	{
 		switch (c)
 		{
@@ -614,6 +685,9 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				only_relfilenode = pstrdup(optarg);
+				break;
+			case 'P':
+				show_progress = true;
 				break;
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
@@ -710,13 +784,38 @@ main(int argc, char *argv[])
 		if (activate)
 			findInitDB(argv[0]);
 #endif
+		/*
+		 * Iff progress status information is requested, we need
+		 * to scan the directory tree(s) twice, once to get the idea
+		 * how much data we need to scan and finally to do the real
+		 * legwork.
+		 */
+		totalsize = scan_directory(DataDir, "global", true);
+		totalsize += scan_directory(DataDir, "base", true);
+		totalsize += scan_directory(DataDir, "pg_tblspc", true);
+
 		/* Scan all files */
-		scan_directory(DataDir, "global");
-		scan_directory(DataDir, "base");
-		scan_directory(DataDir, "pg_tblspc");
+		scan_directory(DataDir, "global", false);
+		scan_directory(DataDir, "base", false);
+		scan_directory(DataDir, "pg_tblspc", false);
+
+		/*
+		 * Done. Move to next line in case progress information
+		 * was shown. Otherwise we clutter the summary output.
+		 */
+		if (show_progress) {
+			report_progress(true);
+			if (isatty(fileno(stderr)))
+				fprintf(stderr, "\n");
+		}
+
+		/*
+		 * Print summary and we're done.
+		 */
 		printf(_("Checksum scan completed\n"));
 		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
 		printf(_("Blocks scanned: %" INT64_MODIFIER "d\n"), blocks);
+
 		if (verify)
 			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
 		else
