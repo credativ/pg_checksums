@@ -73,7 +73,7 @@ static const char *progname;
 int64		total_size = 0;
 int64		current_size = 0;
 pg_time_t	last_progress_update;
-pg_time_t   scan_started;
+pg_time_t	scan_started;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
@@ -145,7 +145,7 @@ report_progress(bool force)
 
 	char		totalstr[32];
 	char		currentstr[32];
-	char        currspeedstr[32];
+	char		currspeedstr[32];
 
 	/* Make sure we just report at least once a second */
 	if ((now == last_progress_update) && !force)
@@ -833,8 +833,8 @@ main(int argc, char *argv[])
 		total_size += scan_directory(DataDir, "pg_tblspc", true);
 
 		/*
-		 * Remember start time. Required to calculate the
-		 * current speed in report_progress()
+		 * Remember start time. Required to calculate the current speed in
+		 * report_progress()
 		 */
 		scan_started = time(NULL);
 
