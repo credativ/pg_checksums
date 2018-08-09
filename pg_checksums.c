@@ -70,14 +70,14 @@ static const char *progname;
 /*
  * Progress status information.
  */
-int64 totalsize = 0;
-int64 current_size = 0;
-pg_time_t last_progress_update;
+int64		total_size = 0;
+int64		current_size = 0;
+pg_time_t	last_progress_update;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
 #define MAXCMDLEN (2 * MAXPGPATH)
-char initdb_path[MAXPGPATH];
+char		initdb_path[MAXPGPATH];
 
 static void findInitDB(const char *argv0);
 static void syncDataDir(char *DataDir);
@@ -118,12 +118,15 @@ static const char *skip[] = {
 	NULL,
 };
 
-static void enable_progress_report(int signo,
-								   siginfo_t *siginfo,
-								   void *context) {
+static void
+enable_progress_report(int signo,
+					   siginfo_t * siginfo,
+					   void *context)
+{
 
 	/* we handle SIGUSR1 only */
-	if (signo == SIGUSR1) {
+	if (signo == SIGUSR1)
+	{
 		show_progress = true;
 	}
 
@@ -133,13 +136,14 @@ static void enable_progress_report(int signo,
  * Report current progress status. Parts borrowed from
  * PostgreSQLs' src/bin/pg_basebackup.c
  */
-static void report_progress(bool force)
+static void
+report_progress(bool force)
 {
-	pg_time_t now = time(NULL);
-	int total_percent = 0;
+	pg_time_t	now = time(NULL);
+	int			total_percent = 0;
 
-	char totalstr[32];
-	char currentstr[32];
+	char		totalstr[32];
+	char		currentstr[32];
 
 	/* Make sure we just report at least once a second */
 	if ((now == last_progress_update) && !force)
@@ -149,21 +153,20 @@ static void report_progress(bool force)
 	last_progress_update = now;
 
 	/*
-	 * Calculate current percent done, based on
-	 * KiB...
+	 * Calculate current percent done, based on KiB...
 	 */
-	total_percent = totalsize ? (int64) ((current_size / 1024) * 100 / (totalsize / 1024)) : 0;
+	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
 
 	/* Don't display larger than 100% */
 	if (total_percent > 100)
 		total_percent = 100;
 
 	/* The same for total size */
-	if (current_size > totalsize)
-		totalsize = current_size / 1024;
+	if (current_size > total_size)
+		total_size = current_size / 1024;
 
 	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
-			 totalsize);
+			 total_size);
 	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
 			 current_size);
 	fprintf(stderr, "%s/%s (%d%%)",
@@ -240,18 +243,17 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 						progname, blockno, fn, r);
 
 			/*
-			 * Retry the block. It's possible that we read the
-			 * block while it was extended or shrinked, so it it
-			 * ends up looking torn to us. If there were less than
-			 * 10 bad blocks so far, we wait for 500ms before we
-			 * retry.
+			 * Retry the block. It's possible that we read the block while it
+			 * was extended or shrinked, so it it ends up looking torn to us.
+			 * If there were less than 10 bad blocks so far, we wait for 500ms
+			 * before we retry.
 			 */
 			if (badblocks < 10)
 				pg_usleep(500);
 
 			/*
-			 * Seek back by the amount of bytes we read to the
-			 * beginning of the failed block
+			 * Seek back by the amount of bytes we read to the beginning of
+			 * the failed block
 			 */
 			if (lseek(f, -r, SEEK_CUR) == -1)
 			{
@@ -288,12 +290,11 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 			if (csum != header->pd_checksum)
 			{
 				/*
-				 * Retry the block on the first failure.  It's
-				 * possible that we read the first 4K page of
-				 * the block just before postgres updated the
-				 * entire block so it ends up looking torn to
-				 * us. If there were less than 10 bad blocks so
-				 * far, we wait for 500ms before we retry.
+				 * Retry the block on the first failure.  It's possible that
+				 * we read the first 4K page of the block just before postgres
+				 * updated the entire block so it ends up looking torn to us.
+				 * If there were less than 10 bad blocks so far, we wait for
+				 * 500ms before we retry.
 				 */
 				if (block_retry == false)
 				{
@@ -336,8 +337,7 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 			if (show_progress)
 				report_progress(false);
 		}
-		else
-		if (activate)
+		else if (activate)
 		{
 			if (debug)
 				fprintf(stderr, _("%s: checksum set in file \"%s\", block %d: %X\n"),
@@ -371,9 +371,9 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 static int64
 scan_directory(char *basedir, char *subdir, bool sizeonly)
 {
-	int64          dirsize = 0;
-	char		   path[MAXPGPATH];
-	DIR		      *dir;
+	int64		dirsize = 0;
+	char		path[MAXPGPATH];
+	DIR		   *dir;
 	struct dirent *de;
 
 	snprintf(path, sizeof(path), "%s/%s", basedir, subdir);
@@ -585,9 +585,11 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
  */
 #if PG_VERSION_NUM < 100000
 
-static void findInitDB(const char *argv0)
+static void
+findInitDB(const char *argv0)
 {
-	int	ret;
+	int			ret;
+
 	/* locate initdb binary */
 	if ((ret = find_other_exec(argv0, "initdb",
 							   "initdb (PostgreSQL) " PG_VERSION "\n",
@@ -605,7 +607,7 @@ static void findInitDB(const char *argv0)
 		}
 		else
 		{
-			fprintf(stderr, _("%s: program \"initdb\" has different version\n"),	progname);
+			fprintf(stderr, _("%s: program \"initdb\" has different version\n"), progname);
 			exit(1);
 		}
 	}
@@ -653,7 +655,7 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 #endif
 
-	struct sigaction act; /* to turn progress status info on */
+	struct sigaction act;		/* to turn progress status info on */
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
 
@@ -768,8 +770,8 @@ main(int argc, char *argv[])
 #endif
 
 	/*
-	 * Cluster must be shut down for activation/deactivation of checksums,
-	 * but online verification is supported.
+	 * Cluster must be shut down for activation/deactivation of checksums, but
+	 * online verification is supported.
 	 */
 	if (ControlFile->state != DB_SHUTDOWNED &&
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY &&
@@ -798,33 +800,33 @@ main(int argc, char *argv[])
 		if (activate)
 			findInitDB(argv[0]);
 #endif
+
 		/*
-		 * Assign SIGUSR1 signal handler to turn progress
-		 * status information on in case someone has
-		 * forgotten -P (and doesn't want to restart)...
+		 * Assign SIGUSR1 signal handler to turn progress status information
+		 * on in case someone has forgotten -P (and doesn't want to
+		 * restart)...
 		 */
 		memset(&act, '\0', sizeof(act));
 		act.sa_sigaction = &enable_progress_report;
-		act.sa_flags  = SA_SIGINFO;
+		act.sa_flags = SA_SIGINFO;
 
 		/*
-		 * Enable signaler handler, but don't treat it as
-		 * severe if we don't succeed here. Just give a
-		 * message on STDERR.
+		 * Enable signal handler, but don't treat it as severe if we don't
+		 * succeed here. Just give a message on STDERR.
 		 */
-		if (sigaction(SIGUSR1, &act, NULL) < 0) {
+		if (sigaction(SIGUSR1, &act, NULL) < 0)
+		{
 			fprintf(stderr, "could not set signal handler to turn on progress bar\n");
 		}
 
 		/*
-		 * Iff progress status information is requested, we need
-		 * to scan the directory tree(s) twice, once to get the idea
-		 * how much data we need to scan and finally to do the real
-		 * legwork.
+		 * Iff progress status information is requested, we need to scan the
+		 * directory tree(s) twice, once to get the idea how much data we need
+		 * to scan and finally to do the real legwork.
 		 */
-		totalsize = scan_directory(DataDir, "global", true);
-		totalsize += scan_directory(DataDir, "base", true);
-		totalsize += scan_directory(DataDir, "pg_tblspc", true);
+		total_size = scan_directory(DataDir, "global", true);
+		total_size += scan_directory(DataDir, "base", true);
+		total_size += scan_directory(DataDir, "pg_tblspc", true);
 
 		/* Scan all files */
 		scan_directory(DataDir, "global", false);
@@ -832,10 +834,11 @@ main(int argc, char *argv[])
 		scan_directory(DataDir, "pg_tblspc", false);
 
 		/*
-		 * Done. Move to next line in case progress information
-		 * was shown. Otherwise we clutter the summary output.
+		 * Done. Move to next line in case progress information was shown.
+		 * Otherwise we clutter the summary output.
 		 */
-		if (show_progress) {
+		if (show_progress)
+		{
 			report_progress(true);
 			if (isatty(fileno(stderr)))
 				fprintf(stderr, "\n");
