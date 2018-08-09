@@ -73,6 +73,7 @@ static const char *progname;
 int64		total_size = 0;
 int64		current_size = 0;
 pg_time_t	last_progress_update;
+pg_time_t   scan_started;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
@@ -144,6 +145,7 @@ report_progress(bool force)
 
 	char		totalstr[32];
 	char		currentstr[32];
+	char        currspeedstr[32];
 
 	/* Make sure we just report at least once a second */
 	if ((now == last_progress_update) && !force)
@@ -166,11 +168,13 @@ report_progress(bool force)
 		total_size = current_size / 1024;
 
 	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
-			 total_size);
+			 total_size / 1024);
 	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
-			 current_size);
-	fprintf(stderr, "%s/%s (%d%%)",
-			currentstr, totalstr, total_percent);
+			 current_size / 1024);
+	snprintf(currspeedstr, sizeof(currspeedstr), INT64_FORMAT,
+			 (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started)));
+	fprintf(stderr, "%s/%s kB (%d%%, %s kB/s)",
+			currentstr, totalstr, total_percent, currspeedstr);
 
 	if (isatty(fileno(stderr)))
 		fprintf(stderr, "\r");
@@ -827,6 +831,12 @@ main(int argc, char *argv[])
 		total_size = scan_directory(DataDir, "global", true);
 		total_size += scan_directory(DataDir, "base", true);
 		total_size += scan_directory(DataDir, "pg_tblspc", true);
+
+		/*
+		 * Remember start time. Required to calculate the
+		 * current speed in report_progress()
+		 */
+		scan_started = time(NULL);
 
 		/* Scan all files */
 		scan_directory(DataDir, "global", false);
