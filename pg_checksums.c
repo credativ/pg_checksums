@@ -31,6 +31,8 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <signal.h>
+#include <time.h>
 
 #if PG_VERSION_NUM <  90400
 #include <unistd.h>
@@ -61,13 +63,22 @@ static bool debug = false;
 static bool verify = false;
 static bool activate = false;
 static bool deactivate = false;
+static bool show_progress = false;
 
 static const char *progname;
+
+/*
+ * Progress status information.
+ */
+int64		total_size = 0;
+int64		current_size = 0;
+pg_time_t	last_progress_update;
+pg_time_t	scan_started;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 #if PG_VERSION_NUM < 100000
 #define MAXCMDLEN (2 * MAXPGPATH)
-char initdb_path[MAXPGPATH];
+char		initdb_path[MAXPGPATH];
 
 static void findInitDB(const char *argv0);
 static void syncDataDir(char *DataDir);
@@ -89,6 +100,7 @@ usage()
 	printf(_("  -c,            verify checksums\n"));
 	printf(_("  -r relfilenode check only relation with specified relfilenode\n"));
 	printf(_("  -d             debug output\n"));
+	printf(_("  -P             show progress information\n"));
 	printf(_("  -V, --version  output version information, then exit\n"));
 	printf(_("  -?, --help     show this help, then exit\n"));
 	printf(_("\nOne of -a, -b or -c is mandatory. If no data directory "
@@ -107,6 +119,69 @@ static const char *skip[] = {
 	NULL,
 };
 
+static void
+enable_progress_report(int signo,
+					   siginfo_t * siginfo,
+					   void *context)
+{
+
+	/* we handle SIGUSR1 only */
+	if (signo == SIGUSR1)
+	{
+		show_progress = true;
+	}
+
+}
+
+/*
+ * Report current progress status. Parts borrowed from
+ * PostgreSQLs' src/bin/pg_basebackup.c
+ */
+static void
+report_progress(bool force)
+{
+	pg_time_t	now = time(NULL);
+	int			total_percent = 0;
+
+	char		totalstr[32];
+	char		currentstr[32];
+	char		currspeedstr[32];
+
+	/* Make sure we just report at least once a second */
+	if ((now == last_progress_update) && !force)
+		return;
+
+	/* Save current time */
+	last_progress_update = now;
+
+	/*
+	 * Calculate current percent done, based on KiB...
+	 */
+	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
+
+	/* Don't display larger than 100% */
+	if (total_percent > 100)
+		total_percent = 100;
+
+	/* The same for total size */
+	if (current_size > total_size)
+		total_size = current_size / 1024;
+
+	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
+			 total_size / 1024);
+	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
+			 current_size / 1024);
+	snprintf(currspeedstr, sizeof(currspeedstr), INT64_FORMAT,
+			 (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started)));
+	fprintf(stderr, "%s/%s kB (%d%%, %s kB/s)",
+			currentstr, totalstr, total_percent, currspeedstr);
+
+	if (isatty(fileno(stderr)))
+		fprintf(stderr, "\r");
+	else
+		fprintf(stderr, "\n");
+}
+
 static bool
 skipfile(char *fn)
 {
@@ -123,7 +198,7 @@ skipfile(char *fn)
 }
 
 static void
-scan_file(char *fn, int segmentno)
+scan_file(char *fn, int segmentno, bool sizeonly)
 {
 	char		buf[BLCKSZ];
 	PageHeader	header = (PageHeader) buf;
@@ -172,18 +247,17 @@ scan_file(char *fn, int segmentno)
 						progname, blockno, fn, r);
 
 			/*
-			 * Retry the block. It's possible that we read the
-			 * block while it was extended or shrinked, so it it
-			 * ends up looking torn to us. If there were less than
-			 * 10 bad blocks so far, we wait for 500ms before we
-			 * retry.
+			 * Retry the block. It's possible that we read the block while it
+			 * was extended or shrinked, so it it ends up looking torn to us.
+			 * If there were less than 10 bad blocks so far, we wait for 500ms
+			 * before we retry.
 			 */
 			if (badblocks < 10)
 				pg_usleep(500);
 
 			/*
-			 * Seek back by the amount of bytes we read to the
-			 * beginning of the failed block
+			 * Seek back by the amount of bytes we read to the beginning of
+			 * the failed block
 			 */
 			if (lseek(f, -r, SEEK_CUR) == -1)
 			{
@@ -213,18 +287,18 @@ scan_file(char *fn, int segmentno)
 		}
 
 		csum = pg_checksum_page(buf, blockno + segmentno * RELSEG_SIZE);
+		current_size += r;
 
 		if (verify)
 		{
 			if (csum != header->pd_checksum)
 			{
 				/*
-				 * Retry the block on the first failure.  It's
-				 * possible that we read the first 4K page of
-				 * the block just before postgres updated the
-				 * entire block so it ends up looking torn to
-				 * us. If there were less than 10 bad blocks so
-				 * far, we wait for 500ms before we retry.
+				 * Retry the block on the first failure.  It's possible that
+				 * we read the first 4K page of the block just before postgres
+				 * updated the entire block so it ends up looking torn to us.
+				 * If there were less than 10 bad blocks so far, we wait for
+				 * 500ms before we retry.
 				 */
 				if (block_retry == false)
 				{
@@ -248,6 +322,7 @@ scan_file(char *fn, int segmentno)
 
 					/* Reset loop to validate the block again */
 					blockno--;
+					current_size -= r;
 
 					continue;
 				}
@@ -262,9 +337,11 @@ scan_file(char *fn, int segmentno)
 						progname, blockno, fn);
 
 			block_retry = false;
+
+			if (show_progress)
+				report_progress(false);
 		}
-		else
-		if (activate)
+		else if (activate)
 		{
 			if (debug)
 				fprintf(stderr, _("%s: checksum set in file \"%s\", block %d: %X\n"),
@@ -286,15 +363,19 @@ scan_file(char *fn, int segmentno)
 				fprintf(stderr, _("%s: write failed: %s\n"), progname, strerror(errno));
 				exit(1);
 			}
+
+			if (show_progress)
+				report_progress(false);
 		}
 	}
 
 	close(f);
 }
 
-static void
-scan_directory(char *basedir, char *subdir)
+static int64
+scan_directory(char *basedir, char *subdir, bool sizeonly)
 {
+	int64		dirsize = 0;
 	char		path[MAXPGPATH];
 	DIR		   *dir;
 	struct dirent *de;
@@ -367,16 +448,22 @@ scan_directory(char *basedir, char *subdir)
 			if (debug && activate)
 				fprintf(stderr, _("%s: activate checksum in file \"%s\"\n"), progname, fn);
 
-			scan_file(fn, segmentno);
+			dirsize += st.st_size;
+
+			if (!sizeonly)
+			{
+				scan_file(fn, segmentno, sizeonly);
+			}
 		}
 #ifndef WIN32
 		else if (S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
 #else
 		else if (S_ISDIR(st.st_mode) || pgwin32_is_junction(fn))
 #endif
-			scan_directory(path, de->d_name);
+			dirsize += scan_directory(path, de->d_name, sizeonly);
 	}
 	closedir(dir);
+	return dirsize;
 }
 
 /*
@@ -502,9 +589,11 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
  */
 #if PG_VERSION_NUM < 100000
 
-static void findInitDB(const char *argv0)
+static void
+findInitDB(const char *argv0)
 {
-	int	ret;
+	int			ret;
+
 	/* locate initdb binary */
 	if ((ret = find_other_exec(argv0, "initdb",
 							   "initdb (PostgreSQL) " PG_VERSION "\n",
@@ -522,7 +611,7 @@ static void findInitDB(const char *argv0)
 		}
 		else
 		{
-			fprintf(stderr, _("%s: program \"initdb\" has different version\n"),	progname);
+			fprintf(stderr, _("%s: program \"initdb\" has different version\n"), progname);
 			exit(1);
 		}
 	}
@@ -570,6 +659,8 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 #endif
 
+	struct sigaction act;		/* to turn progress status info on */
+
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
 
 	progname = get_progname(argv[0]);
@@ -588,7 +679,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt(argc, argv, "D:abcr:d")) != -1)
+	while ((c = getopt(argc, argv, "D:abcr:dP")) != -1)
 	{
 		switch (c)
 		{
@@ -614,6 +705,9 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				only_relfilenode = pstrdup(optarg);
+				break;
+			case 'P':
+				show_progress = true;
 				break;
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
@@ -680,8 +774,8 @@ main(int argc, char *argv[])
 #endif
 
 	/*
-	 * Cluster must be shut down for activation/deactivation of checksums,
-	 * but online verification is supported.
+	 * Cluster must be shut down for activation/deactivation of checksums, but
+	 * online verification is supported.
 	 */
 	if (ControlFile->state != DB_SHUTDOWNED &&
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY &&
@@ -710,13 +804,63 @@ main(int argc, char *argv[])
 		if (activate)
 			findInitDB(argv[0]);
 #endif
+
+		/*
+		 * Assign SIGUSR1 signal handler to turn progress status information
+		 * on in case someone has forgotten -P (and doesn't want to
+		 * restart)...
+		 */
+		memset(&act, '\0', sizeof(act));
+		act.sa_sigaction = &enable_progress_report;
+		act.sa_flags = SA_SIGINFO;
+
+		/*
+		 * Enable signal handler, but don't treat it as severe if we don't
+		 * succeed here. Just give a message on STDERR.
+		 */
+		if (sigaction(SIGUSR1, &act, NULL) < 0)
+		{
+			fprintf(stderr, "could not set signal handler to turn on progress bar\n");
+		}
+
+		/*
+		 * Iff progress status information is requested, we need to scan the
+		 * directory tree(s) twice, once to get the idea how much data we need
+		 * to scan and finally to do the real legwork.
+		 */
+		total_size = scan_directory(DataDir, "global", true);
+		total_size += scan_directory(DataDir, "base", true);
+		total_size += scan_directory(DataDir, "pg_tblspc", true);
+
+		/*
+		 * Remember start time. Required to calculate the current speed in
+		 * report_progress()
+		 */
+		scan_started = time(NULL);
+
 		/* Scan all files */
-		scan_directory(DataDir, "global");
-		scan_directory(DataDir, "base");
-		scan_directory(DataDir, "pg_tblspc");
+		scan_directory(DataDir, "global", false);
+		scan_directory(DataDir, "base", false);
+		scan_directory(DataDir, "pg_tblspc", false);
+
+		/*
+		 * Done. Move to next line in case progress information was shown.
+		 * Otherwise we clutter the summary output.
+		 */
+		if (show_progress)
+		{
+			report_progress(true);
+			if (isatty(fileno(stderr)))
+				fprintf(stderr, "\n");
+		}
+
+		/*
+		 * Print summary and we're done.
+		 */
 		printf(_("Checksum scan completed\n"));
 		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
 		printf(_("Blocks scanned: %" INT64_MODIFIER "d\n"), blocks);
+
 		if (verify)
 			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
 		else
