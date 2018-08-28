@@ -277,7 +277,7 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 		blocks++;
 
 		/* New pages have no checksum yet */
-		if (verify && PageIsNew(buf))
+		if (PageIsNew(buf))
 		{
 			if (debug && block_retry)
 				fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
