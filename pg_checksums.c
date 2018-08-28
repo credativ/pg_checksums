@@ -797,6 +797,17 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/*
+	 * Check that the PGDATA blocksize is the same as the one pg_checksums
+	 * was compiled against (BLCKSZ).
+	 */
+	if (ControlFile->blcksz != BLCKSZ)
+	{
+		fprintf(stderr, _("%s: data directory block size %d is different to compiled-in block size %d.\n"),
+				progname, ControlFile->blcksz, BLCKSZ);
+		exit(1);
+	}
+
 	if (activate || verify)
 	{
 #if PG_VERSION_NUM < 100000
