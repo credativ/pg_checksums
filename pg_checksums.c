@@ -322,6 +322,7 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 
 					/* Reset loop to validate the block again */
 					blockno--;
+					blocks--;
 					current_size -= r;
 
 					continue;
