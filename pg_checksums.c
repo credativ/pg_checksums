@@ -202,7 +202,7 @@ skipfile(char *fn)
 static void
 scan_file(char *fn, int segmentno, bool sizeonly)
 {
-	char		buf[BLCKSZ];
+	char	   *buf = palloc(BLCKSZ);
 	PageHeader	header = (PageHeader) buf;
 	int			f;
 	int			blockno;
@@ -386,6 +386,8 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 	}
 
 	close(f);
+
+	pfree(buf);
 }
 
 static int64
