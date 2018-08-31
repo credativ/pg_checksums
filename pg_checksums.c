@@ -100,8 +100,8 @@ usage()
 	printf(_("  -b,            deactivate checksums\n"));
 	printf(_("  -c,            verify checksums\n"));
 	printf(_("  -r relfilenode check only relation with specified relfilenode\n"));
-	printf(_("  -d             debug output\n"));
-	printf(_("  -v             output verbose messages\n"));
+	printf(_("  -d, --debug    debug output\n"));
+	printf(_("  -v, --verbose  output verbose messages\n"));
 	printf(_("  -P             show progress information\n"));
 	printf(_("  -V, --version  output version information, then exit\n"));
 	printf(_("  -?, --help     show this help, then exit\n"));
@@ -666,8 +666,16 @@ syncDataDir(char *DataDir)
 int
 main(int argc, char *argv[])
 {
+	static struct option long_options[] = {
+		{"pgdata", required_argument, NULL, 'D'},
+		{"debug", no_argument, NULL, 'd'},
+		{"verbose", no_argument, NULL, 'v'},
+		{NULL, 0, NULL, 0}
+	};
+
 	char	   *DataDir = NULL;
 	int			c;
+	int			option_index;
 #if PG_VERSION_NUM >= 100000
 	bool		crc_ok;
 #endif
@@ -692,7 +700,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt(argc, argv, "D:abcr:dvP")) != -1)
+	while ((c = getopt_long(argc, argv, "D:abcr:dvP", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
