@@ -60,6 +60,7 @@ static ControlFileData *ControlFile;
 
 static char *only_relfilenode = NULL;
 static bool debug = false;
+static bool verbose = false;
 static bool verify = false;
 static bool activate = false;
 static bool deactivate = false;
@@ -100,6 +101,7 @@ usage()
 	printf(_("  -c,            verify checksums\n"));
 	printf(_("  -r relfilenode check only relation with specified relfilenode\n"));
 	printf(_("  -d             debug output\n"));
+	printf(_("  -v             output verbose messages\n"));
 	printf(_("  -P             show progress information\n"));
 	printf(_("  -V, --version  output version information, then exit\n"));
 	printf(_("  -?, --help     show this help, then exit\n"));
@@ -333,7 +335,7 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 							progname, fn, blockno, csum, header->pd_checksum);
 				badblocks++;
 			}
-			else if (block_retry)
+			else if (block_retry && verbose)
 				fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
 						progname, blockno, fn);
 
@@ -368,6 +370,19 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 			if (show_progress)
 				report_progress(false);
 		}
+	}
+
+	if (verify)
+	{
+		if (verbose)
+			fprintf(stderr,
+				_("%s: checksums verified in file \"%s\"\n"), progname, fn);
+	}
+	else if (activate)
+	{
+		if (verbose)
+			fprintf(stderr,
+				_("%s: checksums activated in file \"%s\"\n"), progname, fn);
 	}
 
 	close(f);
@@ -445,9 +460,6 @@ scan_directory(char *basedir, char *subdir, bool sizeonly)
 			if (only_relfilenode && strcmp(only_relfilenode, de->d_name) != 0)
 				/* Relfilenode not to be included */
 				continue;
-
-			if (debug && activate)
-				fprintf(stderr, _("%s: activate checksum in file \"%s\"\n"), progname, fn);
 
 			dirsize += st.st_size;
 
@@ -680,7 +692,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt(argc, argv, "D:abcr:dP")) != -1)
+	while ((c = getopt(argc, argv, "D:abcr:dvP")) != -1)
 	{
 		switch (c)
 		{
@@ -709,6 +721,9 @@ main(int argc, char *argv[])
 				break;
 			case 'P':
 				show_progress = true;
+				break;
+			case 'v':
+				verbose = true;
 				break;
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
