@@ -715,6 +715,7 @@ main(int argc, char *argv[])
 				break;
 			case 'd':
 				debug = true;
+				verbose = true;
 				break;
 			case 'D':
 				DataDir = optarg;
