@@ -132,16 +132,14 @@ static const char *const skip[] = {
 };
 
 static void
-enable_progress_report(int signo,
+toggle_progress_report(int signo,
 					   siginfo_t * siginfo,
 					   void *context)
 {
 
-	/* we handle SIGUSR1 only */
+	/* we handle SIGUSR1 only, and toggle the value of show_progress */
 	if (signo == SIGUSR1)
-	{
-		show_progress = true;
-	}
+		show_progress = !show_progress;
 
 }
 
@@ -214,7 +212,7 @@ skipfile(const char *fn)
 }
 
 static void
-scan_file(const char *fn, BlockNumber segmentno, bool sizeonly)
+scan_file(const char *fn, BlockNumber segmentno, sizeonly)
 {
 	PGAlignedBlock	buf;
 	PageHeader	header = (PageHeader) buf.data;
@@ -846,12 +844,11 @@ main(int argc, char *argv[])
 #endif
 
 		/*
-		 * Assign SIGUSR1 signal handler to turn progress status information
-		 * on in case someone has forgotten -P (and doesn't want to
-		 * restart)...
+		 * Assign SIGUSR1 signal handler to toggle progress status
+		 * information
 		 */
 		memset(&act, '\0', sizeof(act));
-		act.sa_sigaction = &enable_progress_report;
+		act.sa_sigaction = &toggle_progress_report;
 		act.sa_flags = SA_SIGINFO;
 
 		/*
@@ -860,7 +857,7 @@ main(int argc, char *argv[])
 		 */
 		if (sigaction(SIGUSR1, &act, NULL) < 0)
 		{
-			fprintf(stderr, "could not set signal handler to turn on progress bar\n");
+			fprintf(stderr, "could not set signal handler to toggle progress\n");
 		}
 
 		/*
