@@ -112,7 +112,7 @@ usage(void)
 	printf(_("  -r relfilenode         check only relation with specified relfilenode\n"));
 	printf(_("  -d, --debug            debug output\n"));
 	printf(_("  -v, --verbose          output verbose messages\n"));
-	printf(_("  -P                     show progress information\n"));
+	printf(_("  -P, --progress         show progress information\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
 	printf(_("  -?, --help             show this help, then exit\n"));
 	printf(_("\nOne of -a, -b or -c is mandatory. If no data directory "
@@ -157,7 +157,7 @@ report_progress(bool force)
 	char		currentstr[32];
 	char		currspeedstr[32];
 
-	/* Make sure we just report at least once a second */
+	/* Make sure we report at most once a second */
 	if ((now == last_progress_update) && !force)
 		return;
 
@@ -186,6 +186,10 @@ report_progress(bool force)
 	fprintf(stderr, "%s/%s kB (%d%%, %s kB/s)",
 			currentstr, totalstr, total_percent, currspeedstr);
 
+	/*
+	 * If we are reporting to a terminal, send a carriage return so that we
+	 * stay on the same line.  If not, send a newline.
+	 */
 	if (isatty(fileno(stderr)))
 		fprintf(stderr, "\r");
 	else
@@ -212,7 +216,7 @@ skipfile(const char *fn)
 }
 
 static void
-scan_file(const char *fn, BlockNumber segmentno, sizeonly)
+scan_file(const char *fn, BlockNumber segmentno)
 {
 	PGAlignedBlock	buf;
 	PageHeader	header = (PageHeader) buf.data;
@@ -464,7 +468,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 
 			if (!sizeonly)
 			{
-				scan_file(fn, segmentno, sizeonly);
+				scan_file(fn, segmentno);
 			}
 		}
 #ifndef WIN32
@@ -668,6 +672,7 @@ main(int argc, char *argv[])
 	static struct option long_options[] = {
 		{"pgdata", required_argument, NULL, 'D'},
 		{"debug", no_argument, NULL, 'd'},
+		{"progress", no_argument, NULL, 'P'},
 		{"verbose", no_argument, NULL, 'v'},
 		{NULL, 0, NULL, 0}
 	};
@@ -847,7 +852,7 @@ main(int argc, char *argv[])
 		 * Assign SIGUSR1 signal handler to toggle progress status
 		 * information
 		 */
-		memset(&act, '\0', sizeof(act));
+		memset(&act, 0, sizeof(act));
 		act.sa_sigaction = &toggle_progress_report;
 		act.sa_flags = SA_SIGINFO;
 
