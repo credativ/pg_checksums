@@ -55,8 +55,10 @@ extern char *optarg;
 
 static int64 files = 0;
 static int64 blocks = 0;
+static int64 skippedblocks = 0;
 static int64 badblocks = 0;
 static ControlFileData *ControlFile;
+static XLogRecPtr checkpointLSN;
 
 static char *only_relfilenode = NULL;
 static bool debug = false;
@@ -193,9 +195,13 @@ skipfile(char *fn)
 		strcmp(fn, "..") == 0)
 		return true;
 
-	for (f = skip; *f; f++)
+	for (f = skip; *f; f++) {
 		if (strcmp(*f, fn) == 0)
 			return true;
+		if (strcmp(*f, "pg_internal.init") == 0)
+			if (strncmp(*f, fn, strlen(*f)) == 0)
+				return true;
+	}
 	return false;
 }
 
@@ -211,6 +217,12 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 	f = open(fn, O_RDWR);
 	if (f < 0)
 	{
+		if (errno == ENOENT)
+		{
+			/* File was removed in the meantime */
+			return;
+		}
+
 		fprintf(stderr, _("%s: could not open file \"%s\": %m\n"), progname, fn);
 		exit(1);
 	}
@@ -227,56 +239,19 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 					progname, blockno, fn);
 
 		if (r == 0)
-		{
-			if (debug && block_retry)
-				fprintf(stderr, _("%s: block %d in file \"%s\" is EOF, ignoring\n"),
-						progname, blockno, fn);
 			break;
+		if (r < 0)
+		{
+			fprintf(stderr, _("%s: could not read block %u in file \"%s\": %s\n"),
+					progname, blockno, fn, strerror(errno));
+			return;
 		}
-
 		if (r != BLCKSZ)
 		{
-			if (block_retry)
-			{
-				/* We already tried once to reread the block, bail out */
-				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
-						progname, blockno, fn, r);
-				exit(1);
-			}
-
-			if (debug)
-				fprintf(stderr, _("%s: short read of block %d in file \"%s\", got only %d bytes\n"),
-						progname, blockno, fn, r);
-
-			/*
-			 * Retry the block. It's possible that we read the block while it
-			 * was extended or shrinked, so it it ends up looking torn to us.
-			 * If there were less than 10 bad blocks so far, we wait for 500ms
-			 * before we retry.
-			 */
-			if (badblocks < 10)
-				pg_usleep(500);
-
-			/*
-			 * Seek back by the amount of bytes we read to the beginning of
-			 * the failed block
-			 */
-			if (lseek(f, -r, SEEK_CUR) == -1)
-			{
-				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
-						progname, fn);
-				exit(1);
-			}
-
-			/* Set flag so we know a retry was attempted */
-			block_retry = true;
-
-			/* Reset loop to validate the block again */
-			blockno--;
-
+			/* Skip partially read blocks */
+			skippedblocks++;
 			continue;
 		}
-		blocks++;
 
 		/* New pages have no checksum yet */
 		if (PageIsNew(buf))
@@ -284,9 +259,11 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 			if (debug && block_retry)
 				fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
 						progname, blockno, fn);
-			block_retry = false;
+			skippedblocks++;
 			continue;
 		}
+
+		blocks++;
 
 		csum = pg_checksum_page(buf, blockno + segmentno * RELSEG_SIZE);
 		current_size += r;
@@ -299,14 +276,12 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 				 * Retry the block on the first failure.  It's possible that
 				 * we read the first 4K page of the block just before postgres
 				 * updated the entire block so it ends up looking torn to us.
-				 * If there were less than 10 bad blocks so far, we wait for
-				 * 500ms before we retry.
+				 * We only need to retry once because the LSN should be updated
+				 * to something we can ignore on the next pass.  If the error
+				 * happens again then it is a true validation failure.
 				 */
-				if (block_retry == false)
+				if (!block_retry)
 				{
-					if (badblocks < 10)
-						pg_usleep(500);
-
 					/* Seek to the beginning of the failed block */
 					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
 					{
@@ -324,9 +299,24 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 
 					/* Reset loop to validate the block again */
 					blockno--;
-					blocks--;
 					current_size -= r;
 
+					continue;
+				}
+
+				/*
+				 * The checksum verification failed on retry as well.  Check if
+				 * the page has been modified since the checkpoint and skip it
+				 * in this case.
+				 */
+				if (PageGetLSN(buf) > checkpointLSN)
+				{
+					if (debug)
+						fprintf(stderr, _("%s: block %d in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
+								progname, blockno, fn, (uint32) (PageGetLSN(buf) >> 32), (uint32) PageGetLSN(buf), (uint32) (checkpointLSN >> 32), (uint32) checkpointLSN);
+					block_retry = false;
+					blocks--;
+					skippedblocks++;
 					continue;
 				}
 
@@ -335,7 +325,7 @@ scan_file(char *fn, int segmentno, bool sizeonly)
 							progname, fn, blockno, csum, header->pd_checksum);
 				badblocks++;
 			}
-			else if (block_retry && verbose)
+			else if (block_retry && debug)
 				fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
 						progname, blockno, fn);
 
@@ -824,6 +814,9 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/* Get checkpoint LSN */
+	checkpointLSN = ControlFile->checkPoint;
+
 	/*
 	 * Check that the PGDATA blocksize is the same as the one pg_checksums
 	 * was compiled against (BLCKSZ).
@@ -898,6 +891,8 @@ main(int argc, char *argv[])
 		printf(_("Checksum scan completed\n"));
 		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
 		printf(_("Blocks scanned: %" INT64_MODIFIER "d\n"), blocks);
+		if (skippedblocks > 0)
+			printf(_("Blocks skipped: %" INT64_MODIFIER "d\n"), skippedblocks);
 
 		if (verify)
 			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
