@@ -131,6 +131,25 @@ static const char *const skip[] = {
 	NULL,
 };
 
+static bool
+skipfile(const char *fn)
+{
+	const char *const *f;
+
+	if (strcmp(fn, ".") == 0 ||
+		strcmp(fn, "..") == 0)
+		return true;
+
+	for (f = skip; *f; f++) {
+		if (strcmp(*f, fn) == 0)
+			return true;
+		if (strcmp(*f, "pg_internal.init") == 0)
+			if (strncmp(*f, fn, strlen(*f)) == 0)
+				return true;
+	}
+	return false;
+}
+
 static void
 toggle_progress_report(int signo,
 					   siginfo_t * siginfo,
@@ -164,9 +183,7 @@ report_progress(bool force)
 	/* Save current time */
 	last_progress_update = now;
 
-	/*
-	 * Calculate current percent done, based on KiB...
-	 */
+	/* Calculate current percent done, based on KiB... */
 	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
 
 	/* Don't display larger than 100% */
@@ -194,25 +211,6 @@ report_progress(bool force)
 		fprintf(stderr, "\r");
 	else
 		fprintf(stderr, "\n");
-}
-
-static bool
-skipfile(const char *fn)
-{
-	const char *const *f;
-
-	if (strcmp(fn, ".") == 0 ||
-		strcmp(fn, "..") == 0)
-		return true;
-
-	for (f = skip; *f; f++) {
-		if (strcmp(*f, fn) == 0)
-			return true;
-		if (strcmp(*f, "pg_internal.init") == 0)
-			if (strncmp(*f, fn, strlen(*f)) == 0)
-				return true;
-	}
-	return false;
 }
 
 static void
@@ -376,14 +374,12 @@ scan_file(const char *fn, BlockNumber segmentno)
 	if (verify)
 	{
 		if (verbose)
-			fprintf(stderr,
-				_("%s: checksums verified in file \"%s\"\n"), progname, fn);
+			fprintf(stderr, _("%s: checksums verified in file \"%s\"\n"), progname, fn);
 	}
 	else if (activate)
 	{
 		if (verbose)
-			fprintf(stderr,
-				_("%s: checksums activated in file \"%s\"\n"), progname, fn);
+			fprintf(stderr, _("%s: checksums activated in file \"%s\"\n"), progname, fn);
 	}
 
 	close(f);
@@ -467,9 +463,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 			dirsize += st.st_size;
 
 			if (!sizeonly)
-			{
 				scan_file(fn, segmentno);
-			}
 		}
 #ifndef WIN32
 		else if (S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
@@ -600,9 +594,7 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 	}
 }
 
-/*
- * syncDataDir() and findInitDB are used on PostgreSQL releases < 10, only
- */
+/* syncDataDir() and findInitDB() are used on PostgreSQL releases < 10, only */
 #if PG_VERSION_NUM < 100000
 
 static void
@@ -610,7 +602,7 @@ findInitDB(const char *argv0)
 {
 	int			ret;
 
-	/* locate initdb binary */
+	/* Locate initdb binary */
 	if ((ret = find_other_exec(argv0, "initdb",
 							   "initdb (PostgreSQL) " PG_VERSION "\n",
 							   initdb_path)) < 0)
@@ -649,7 +641,7 @@ syncDataDir(char *DataDir)
 	char		cmd[MAXCMDLEN];
 
 
-	/* finally run initdb -S */
+	/* Finally run initdb -S */
 	if (debug)
 		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S",
 				 initdb_path, DataDir);
@@ -684,7 +676,8 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 #endif
 
-	struct sigaction act;		/* to turn progress status info on */
+	/* To turn progress status info on */
+	struct sigaction act;
 
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
 
@@ -773,7 +766,7 @@ main(int argc, char *argv[])
 	/* Complain if no action has been requested */
 	if (!verify && !activate && !deactivate)
 	{
-		fprintf(stderr, _("%s: No action has been specified\n"),
+		fprintf(stderr, _("%s: no action has been specified\n"),
 				progname);
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
 				progname);
@@ -849,8 +842,7 @@ main(int argc, char *argv[])
 #endif
 
 		/*
-		 * Assign SIGUSR1 signal handler to toggle progress status
-		 * information
+		 * Assign SIGUSR1 signal handler to toggle progress status information.
 		 */
 		memset(&act, 0, sizeof(act));
 		act.sa_sigaction = &toggle_progress_report;
@@ -861,9 +853,7 @@ main(int argc, char *argv[])
 		 * succeed here. Just give a message on STDERR.
 		 */
 		if (sigaction(SIGUSR1, &act, NULL) < 0)
-		{
-			fprintf(stderr, "could not set signal handler to toggle progress\n");
-		}
+			fprintf(stderr, _("%s: could not set signal handler to toggle progress\n"), progname);
 
 		/*
 		 * Iff progress status information is requested, we need to scan the
@@ -876,7 +866,7 @@ main(int argc, char *argv[])
 
 		/*
 		 * Remember start time. Required to calculate the current speed in
-		 * report_progress()
+		 * report_progress().
 		 */
 		scan_started = time(NULL);
 
