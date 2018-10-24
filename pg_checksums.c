@@ -890,13 +890,13 @@ main(int argc, char *argv[])
 		 * Print summary and we're done.
 		 */
 		printf(_("Checksum scan completed\n"));
-		printf(_("Files scanned:  %s\n"), psprintf(INT64_FORMAT, files));
-		printf(_("Blocks scanned: %s\n"), psprintf(INT64_FORMAT, blocks));
+		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
+		printf(_("Blocks scanned: %" INT64_MODIFIER "d\n"), blocks);
 		if (skippedblocks > 0)
-			printf(_("Blocks skipped: %s\n"),  psprintf(INT64_FORMAT, skippedblocks));
+			printf(_("Blocks skipped: %" INT64_MODIFIER "d\n"), skippedblocks);
 
 		if (verify)
-			printf(_("Bad checksums:  %s\n"),  psprintf(INT64_FORMAT, badblocks));
+			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
 		else
 		{
 			printf(_("Syncing data directory\n"));
