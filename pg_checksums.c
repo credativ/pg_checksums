@@ -52,15 +52,6 @@ extern char *optarg;
 #define INT64_MODIFIER "l"
 #endif
 
-#if PG_VERSION_NUM < 110000
-typedef union PGAlignedBlock
-{
-	char		data[BLCKSZ];
-	double		force_align_d;
-	int64		force_align_i64;
-} PGAlignedBlock;
-#endif
-
 static int64 files = 0;
 static int64 blocks = 0;
 static int64 skippedblocks = 0;
