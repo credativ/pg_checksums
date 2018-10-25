@@ -28,6 +28,7 @@ extern char *optarg;
 #include "catalog/pg_control.h"
 #if PG_VERSION_NUM >=  90600
 #include "common/controldata_utils.h"
+#include "common/relpath.h"
 #endif
 #if PG_VERSION_NUM >= 110000
 #include "common/file_perm.h"
@@ -112,33 +113,70 @@ usage(void)
 	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
 }
 
-static const char *const skip[] = {
-	"pg_control",
-	"pg_filenode.map",
-	"pg_internal.init",
-	"pg_stat_statements.stat",
-	"PG_VERSION",
-	"pgsql_tmp",
-	NULL,
-};
 
+/*
+ * isRelFileName
+ *
+ * Check if the given file name is authorized for checksum verification.
+ */
 static bool
-skipfile(const char *fn)
+isRelFileName(const char *fn)
 {
-	const char *const *f;
+	int			pos;
 
-	if (strcmp(fn, ".") == 0 ||
-		strcmp(fn, "..") == 0)
+	/*----------
+	 * Only files including data checksums are authorized for verification.
+	 * This is guessed based on the file name by reverse-engineering
+	 * GetRelationPath() so make sure to update both code paths if any
+	 * updates are done.  The following file name formats are allowed:
+	 * <digits>
+	 * <digits>.<segment>
+	 * <digits>_<forkname>
+	 * <digits>_<forkname>.<segment>
+	 *
+	 * Note that temporary files, beginning with 't', are also skipped.
+	 *
+	 *----------
+	 */
+
+	/* A non-empty string of digits should follow */
+	for (pos = 0; isdigit((unsigned char) fn[pos]); ++pos)
+		;
+	/* leave if no digits */
+	if (pos == 0)
+		return false;
+	/* good to go if only digits */
+	if (fn[pos] == '\0')
 		return true;
 
-	for (f = skip; *f; f++) {
-		if (strcmp(*f, fn) == 0)
-			return true;
-		if (strcmp(*f, "pg_internal.init") == 0)
-			if (strncmp(*f, fn, strlen(*f)) == 0)
-				return true;
+	/* Authorized fork files can be scanned */
+	if (fn[pos] == '_')
+	{
+		int			forkchar = forkname_chars(&fn[pos + 1], NULL);
+
+		if (forkchar <= 0)
+			return false;
+
+		pos += forkchar + 1;
 	}
-	return false;
+
+	/* Check for an optional segment number */
+	if (fn[pos] == '.')
+	{
+		int			segchar;
+
+		for (segchar = 1; isdigit((unsigned char) fn[pos + segchar]); ++segchar)
+			;
+
+		if (segchar <= 1)
+			return false;
+		pos += segchar;
+	}
+
+	/* Now this should be the end */
+	if (fn[pos] != '\0')
+		return false;
+	return true;
 }
 
 static void
@@ -397,7 +435,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 		char		fn[MAXPGPATH];
 		struct stat st;
 
-		if (skipfile(de->d_name))
+		if (!isRelFileName(de->d_name))
 			continue;
 
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
