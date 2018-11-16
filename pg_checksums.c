@@ -885,9 +885,10 @@ main(int argc, char *argv[])
 			fprintf(stderr, _("%s: could not set signal handler to toggle progress\n"), progname);
 
 		/*
-		 * Iff progress status information is requested, we need to scan the
-		 * directory tree(s) twice, once to get the idea how much data we need
-		 * to scan and finally to do the real legwork.
+		 * As progress status information may be requested, we need to
+		 * scan the directory tree(s) twice, once to get the idea how
+		 * much data we need to scan and finally to do the real
+		 * legwork.
 		 */
 		total_size = scan_directory(DataDir, "global", true);
 		total_size += scan_directory(DataDir, "base", true);
