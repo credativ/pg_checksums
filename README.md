@@ -11,4 +11,5 @@ The database cluster needs to be shutdown cleanly in the case of checksum
 activation or deactivation, while checksum verification can be performed
 online.
 
-PostgreSQL versions since 9.3 are supported.
+PostgreSQL versions since 9.3 are supported, the November 8th 2018 PostgreSQL
+point release is required.
