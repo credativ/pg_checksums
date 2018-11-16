@@ -890,6 +890,9 @@ main(int argc, char *argv[])
 		 * much data we need to scan and finally to do the real
 		 * legwork.
 		 */
+		if (debug)
+			fprintf(stderr, _("%s: acquiring data for progress reporting\n"), progname);
+
 		total_size = scan_directory(DataDir, "global", true);
 		total_size += scan_directory(DataDir, "base", true);
 		total_size += scan_directory(DataDir, "pg_tblspc", true);
@@ -898,6 +901,8 @@ main(int argc, char *argv[])
 		 * Remember start time. Required to calculate the current speed in
 		 * report_progress().
 		 */
+		if (debug)
+			fprintf(stderr, _("%s: starting scan\n"), progname);
 		scan_started = time(NULL);
 
 		/* Scan all files */
