@@ -108,7 +108,7 @@ $node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
         'pg_checksums reports checksum mismatch'
 );
 
-# Utility routine to check that pg_verify_checksums is able to detect
+# Utility routine to check that pg_checksums is able to detect
 # correctly-named relation files filled with some corrupted data.
 sub fail_corrupt
 {
@@ -117,22 +117,26 @@ sub fail_corrupt
 	my $pgdata = $node->data_dir;
 
 	# Create the file with some dummy data in it.
-	append_to_file "$pgdata/global/$file", "foo";
+	my $file_name = "$pgdata/global/$file";
+	append_to_file $file_name, "foo";
 
-	$node->command_checks_all([ 'pg_verify_checksums', '-D', $pgdata],
+	$node->command_checks_all([ 'pg_checksums', '-D', $pgdata],
 						1,
 						[qr/^$/],
-						[qr/could not read block/],
+						[qr/could not read block 0 in file.*$file\":/]
 						"fails for corrupted data in $file");
+	# Remove file to prevent future lookup errors on conflicts.
+	unlink $file_name;
+	return;
 }
 
 # Authorized relation files filled with corrupted data cause the
 # checksum checks to fail.
-fail_corrupt($node, "99999");
-fail_corrupt($node, "99999.123");
-fail_corrupt($node, "99999_fsm");
-fail_corrupt($node, "99999_init");
-fail_corrupt($node, "99999_vm");
-fail_corrupt($node, "99999_init.123");
-fail_corrupt($node, "99999_fsm.123");
-fail_corrupt($node, "99999_vm.123");
+fail_corrupt($node, "99990");
+fail_corrupt($node, "99990.123");
+fail_corrupt($node, "99990_fsm");
+fail_corrupt($node, "99990_init");
+fail_corrupt($node, "99990_vm");
+fail_corrupt($node, "99990_init.123");
+fail_corrupt($node, "99990_fsm.123");
+fail_corrupt($node, "99990_vm.123");
