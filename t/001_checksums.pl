@@ -120,10 +120,10 @@ sub fail_corrupt
 	my $file_name = "$pgdata/global/$file";
 	append_to_file $file_name, "foo";
 
-	$node->command_checks_all([ 'pg_checksums', '-D', $pgdata],
+	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
 						1,
 						[qr/^$/],
-						[qr/could not read block 0 in file.*$file\":/]
+						[qr/could not read block 0 in file.*$file\":/],
 						"fails for corrupted data in $file");
 	# Remove file to prevent future lookup errors on conflicts.
 	unlink $file_name;
