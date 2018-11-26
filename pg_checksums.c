@@ -287,8 +287,36 @@ scan_file(const char *fn, BlockNumber segmentno)
 		}
 		if (r != BLCKSZ)
 		{
-			/* Skip partially read blocks */
-			skippedblocks++;
+			if (block_retry)
+			{
+				/* We already tried once to reread the block, bail out */
+				fprintf(stderr, _("%s: could not read block %u in file \"%s\": read %d of %d\n"),
+						progname, blockno, fn, r, BLCKSZ);
+				exit(1);
+			}
+
+			/*
+			 * Retry the block. It's possible that we read the block while it
+			 * was extended or shrinked, so it it ends up looking torn to us.
+			 */
+
+			/*
+			 * Seek back by the amount of bytes we read to the beginning of
+			 * the failed block.
+			 */
+			if (lseek(f, -r, SEEK_CUR) == -1)
+			{
+				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+						progname, fn);
+				exit(1);
+			}
+
+			/* Set flag so we know a retry was attempted */
+			block_retry = true;
+
+			/* Reset loop to validate the block again */
+			blockno--;
+
 			continue;
 		}
 
