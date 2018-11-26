@@ -67,6 +67,7 @@ static bool verify = false;
 static bool activate = false;
 static bool deactivate = false;
 static bool show_progress = false;
+static bool online = false;
 
 static const char *progname;
 
@@ -254,7 +255,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 	f = open(fn, O_RDWR | PG_BINARY, 0);
 	if (f < 0)
 	{
-		if (errno == ENOENT)
+		if (online && errno == ENOENT)
 		{
 			/* File was removed in the meantime */
 			return;
@@ -441,7 +442,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
 		if (lstat(fn, &st) < 0)
 		{
-			if (errno == ENOENT)
+			if (online && errno == ENOENT)
 			{
 				/* File was removed in the meantime */
 				if (debug)
@@ -834,6 +835,10 @@ main(int argc, char *argv[])
 	{
 		fprintf(stderr, _("%s: cluster must be shut down\n"), progname);
 		exit(1);
+	}
+	else
+	{
+		online = true;
 	}
 
 	if (ControlFile->data_checksum_version == 0 && !activate)
