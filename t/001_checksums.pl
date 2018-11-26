@@ -16,7 +16,7 @@ my $tempdir = TestLib::tempdir;
 
 # Initialize node
 my $node = get_new_node('main');
-$node->init(allows_streaming => 1);
+$node->init;
 
 $node->start;
 my $pgdata = $node->data_dir;
