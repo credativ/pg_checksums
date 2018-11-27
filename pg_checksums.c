@@ -53,6 +53,9 @@ extern char *optarg;
 #define INT64_MODIFIER "l"
 #endif
 
+#define PG_TEMP_FILES_DIR "pgsql_tmp"
+#define PG_TEMP_FILE_PREFIX "pgsql_tmp"
+
 static int64 files = 0;
 static int64 blocks = 0;
 static int64 skippedblocks = 0;
@@ -113,7 +116,6 @@ usage(void)
 			 "PGDATA is used.\n\n"));
 	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
 }
-
 
 /*
  * isRelFileName
@@ -464,7 +466,20 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 		char		fn[MAXPGPATH];
 		struct stat st;
 
-		if (!isRelFileName(de->d_name))
+		if (strcmp(de->d_name, ".") == 0 ||
+			strcmp(de->d_name, "..") == 0)
+			continue;
+
+		/* Skip temporary files */
+		if (strncmp(de->d_name,
+					PG_TEMP_FILE_PREFIX,
+					strlen(PG_TEMP_FILE_PREFIX)) == 0)
+			continue;
+
+		/* Skip temporary folders */
+		if (strncmp(de->d_name,
+					PG_TEMP_FILES_DIR,
+					strlen(PG_TEMP_FILES_DIR)) == 0)
 			continue;
 
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
@@ -489,6 +504,13 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 			char	   *forkpath,
 					   *segmentpath;
 			BlockNumber	segmentno = 0;
+
+			/*
+			 * Only normal relation files can be analyzed.  Note that this
+			 * skips temporary relations.
+			 */
+			if (!isRelFileName(de->d_name))
+				continue;
 
 			/*
 			 * Cut off at the segment boundary (".") to get the segment number
