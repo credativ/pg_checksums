@@ -378,7 +378,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 				 * the page has been modified since the checkpoint and skip it
 				 * in this case.
 				 */
-				if (PageGetLSN(buf.data) > checkpointLSN)
+				if (online && PageGetLSN(buf.data) > checkpointLSN)
 				{
 					if (debug)
 						fprintf(stderr, _("%s: block %d in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
@@ -880,14 +880,13 @@ main(int argc, char *argv[])
 	 * online verification is supported.
 	 */
 	if (ControlFile->state != DB_SHUTDOWNED &&
-		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY &&
-		!verify)
+		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
 	{
-		fprintf(stderr, _("%s: cluster must be shut down\n"), progname);
-		exit(1);
-	}
-	else
-	{
+		if (!verify)
+		{
+			fprintf(stderr, _("%s: cluster must be shut down\n"), progname);
+			exit(1);
+		}
 		online = true;
 	}
 
