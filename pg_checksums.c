@@ -183,13 +183,11 @@ isRelFileName(const char *fn)
 }
 
 static void
-toggle_progress_report(int signo,
-					   siginfo_t * siginfo,
-					   void *context)
+toggle_progress_report(int signum)
 {
 
 	/* we handle SIGUSR1 only, and toggle the value of show_progress */
-	if (signo == SIGUSR1)
+	if (signum == SIGUSR1)
 		show_progress = !show_progress;
 
 }
@@ -928,9 +926,6 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 #endif
 
-	/* To turn progress status info on */
-	struct sigaction act;
-
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
 
 	progname = get_progname(argv[0]);
@@ -1052,15 +1047,22 @@ main(int argc, char *argv[])
 	 * online verification is supported.
 	 */
 	if (ControlFile->state != DB_SHUTDOWNED &&
-		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY &&
-		!verify)
+		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
 	{
-		fprintf(stderr, _("%s: cluster must be shut down\n"), progname);
-		exit(1);
-	}
-	else
-	{
+		if (!verify)
+		{
+			fprintf(stderr, _("%s: cluster must be shut down\n"), progname);
+			exit(1);
+		}
 		online = true;
+	}
+
+	if (debug)
+	{
+		if (online)
+			fprintf(stderr, _("%s: online mode\n"), progname);
+		else
+			fprintf(stderr, _("%s: offline mode\n"), progname);
 	}
 
 	if (ControlFile->data_checksum_version == 0 && !activate)
@@ -1091,24 +1093,17 @@ main(int argc, char *argv[])
 
 	if (activate || verify)
 	{
+#ifndef WIN32
 		/*
 		 * Assign SIGUSR1 signal handler to toggle progress status information.
 		 */
-		memset(&act, 0, sizeof(act));
-		act.sa_sigaction = &toggle_progress_report;
-		act.sa_flags = SA_SIGINFO;
+		pqsignal(SIGUSR1, toggle_progress_report);
+#endif
 
 		/*
-		 * Enable signal handler, but don't treat it as severe if we don't
-		 * succeed here. Just give a message on STDERR.
-		 */
-		if (sigaction(SIGUSR1, &act, NULL) < 0)
-			fprintf(stderr, _("%s: could not set signal handler to toggle progress\n"), progname);
-
-		/*
-		 * As progress status information may be requested, we need to
-		 * scan the directory tree(s) twice, once to get the idea how
-		 * much data we need to scan and finally to do the real
+		 * As progress status information may be requested even after start of
+		 * operation, we need to scan the directory tree(s) twice, once to get
+		 * the idea how much data we need to scan and finally to do the real
 		 * legwork.
 		 */
 		if (debug)
