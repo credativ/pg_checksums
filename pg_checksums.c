@@ -371,53 +371,58 @@ scan_file(const char *fn, BlockNumber segmentno)
 		{
 			if (csum != header->pd_checksum)
 			{
-				/*
-				 * Retry the block on the first failure.  It's possible that
-				 * we read the first 4K page of the block just before postgres
-				 * updated the entire block so it ends up looking torn to us.
-				 * We only need to retry once because the LSN should be updated
-				 * to something we can ignore on the next pass.  If the error
-				 * happens again then it is a true validation failure.
-				 */
-				if (!block_retry)
+				if (online)
 				{
-					/* Seek to the beginning of the failed block */
-					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
+					/*
+					 * Retry the block on the first failure if online.  If the
+					 * verification is done while the instance is online, it is
+					 * possible that we read the first 4K page of the block
+					 * just before postgres updated the entire block so it ends
+					 * up looking torn to us.  We only need to retry once
+					 * because the LSN should be updated to something we can
+					 * ignore on the next pass.  If the error happens again
+					 * then it is a true validation failure.
+					 */
+					if (!block_retry)
 					{
-						skippedfiles++;
-						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
-								progname, fn);
-						return;
+						/* Seek to the beginning of the failed block */
+						if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
+						{
+							skippedfiles++;
+							fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+									progname, fn);
+							return;
+						}
+
+						/* Set flag so we know a retry was attempted */
+						block_retry = true;
+
+						if (debug)
+							fprintf(stderr, _("%s: checksum verification failed on first attempt in file \"%s\", block %d: calculated checksum %X but block contains %X\n"),
+									progname, fn, blockno, csum, header->pd_checksum);
+
+						/* Reset loop to validate the block again */
+						blockno--;
+						current_size -= r;
+
+						continue;
 					}
 
-					/* Set flag so we know a retry was attempted */
-					block_retry = true;
-
-					if (debug)
-						fprintf(stderr, _("%s: checksum verification failed on first attempt in file \"%s\", block %d: calculated checksum %X but block contains %X\n"),
-								progname, fn, blockno, csum, header->pd_checksum);
-
-					/* Reset loop to validate the block again */
-					blockno--;
-					current_size -= r;
-
-					continue;
-				}
-
-				/*
-				 * The checksum verification failed on retry as well.  Check if
-				 * the page has been modified since the checkpoint and skip it
-				 * in this case.
-				 */
-				if (PageGetLSN(buf.data) > checkpointLSN)
-				{
-					if (debug)
-						fprintf(stderr, _("%s: block %d in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
-								progname, blockno, fn, (uint32) (PageGetLSN(buf.data) >> 32), (uint32) PageGetLSN(buf.data), (uint32) (checkpointLSN >> 32), (uint32) checkpointLSN);
-					block_retry = false;
-					blocks--;
-					skippedblocks++;
-					continue;
+					/*
+					 * The checksum verification failed on retry as well.  Check if
+					 * the page has been modified since the checkpoint and skip it
+					 * in this case.
+					 */
+					if (PageGetLSN(buf.data) > checkpointLSN)
+					{
+						if (debug)
+							fprintf(stderr, _("%s: block %d in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
+									progname, blockno, fn, (uint32) (PageGetLSN(buf.data) >> 32), (uint32) PageGetLSN(buf.data), (uint32) (checkpointLSN >> 32), (uint32) checkpointLSN);
+						block_retry = false;
+						blocks--;
+						skippedblocks++;
+						continue;
+					}
 				}
 
 				if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION)
