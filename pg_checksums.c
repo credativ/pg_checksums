@@ -426,7 +426,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 				}
 
 				if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION)
-					fprintf(stderr, _("%s: checksum verification failed in file \"%s\", block %d: calculated checksum %X but expected %X\n"),
+					fprintf(stderr, _("%s: checksum verification failed in file \"%s\", block %d: calculated checksum %X but block contains %X\n"),
 							progname, fn, blockno, csum, header->pd_checksum);
 				badblocks++;
 			}
