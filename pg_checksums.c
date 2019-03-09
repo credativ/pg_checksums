@@ -1121,7 +1121,7 @@ main(int argc, char *argv[])
 			fprintf(stderr, _("%s: starting scan\n"), progname);
 		scan_started = time(NULL);
 
-		/* Scan all files */
+		/* Operate on all files */
 		scan_directory(DataDir, "global", false);
 		scan_directory(DataDir, "base", false);
 		scan_directory(DataDir, "pg_tblspc", false);
@@ -1149,48 +1149,35 @@ main(int argc, char *argv[])
 			printf(_("Blocks skipped: %" INT64_MODIFIER "d\n"), skippedblocks);
 
 		if (verify)
-			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
-		else
 		{
-			printf(_("Syncing data directory\n"));
-			fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
+			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
+			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
+			if (badblocks > 0)
+				return 1;
+
+			/* skipped blocks or files are considered an error if offline */
+			if (!online)
+				if (skippedblocks > 0 || skippedfiles > 0)
+					return 1;
 		}
 	}
 
 	if (activate || deactivate)
 	{
+		/* Update control file */
 		if (activate)
-		{
 			ControlFile->data_checksum_version = 1;
-			updateControlFile(DataDir, ControlFile);
-			printf(_("Checksums activated\n"));
-		}
 		else
-		{
 			ControlFile->data_checksum_version = 0;
-			updateControlFile(DataDir, ControlFile);
+		updateControlFile(DataDir, ControlFile);
+		fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
+		if (verbose)
+			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
+		if (activate)
+			printf(_("Checksums activated\n"));
+		else
 			printf(_("Checksums deactivated\n"));
-		}
-
-		/* Re-read pg_control */
-#if PG_VERSION_NUM >= 100000
-		ControlFile = get_controlfile(DataDir, progname, &crc_ok);
-#elif PG_VERSION_NUM >= 90600
-		ControlFile = get_controlfile(DataDir, progname);
-#else
-		ControlFile = getControlFile(DataDir);
-#endif
 	}
-
-	printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
-
-	if (verify && badblocks > 0)
-		return 1;
-
-	/* skipped blocks or files are considered an error if offline */
-	if (!online)
-		if (skippedblocks > 0 || skippedfiles > 0)
-			return 1;
 
 	return 0;
 }
