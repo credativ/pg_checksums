@@ -56,6 +56,11 @@ extern char *optarg;
 #define PG_TEMP_FILES_DIR "pgsql_tmp"
 #define PG_TEMP_FILE_PREFIX "pgsql_tmp"
 
+/*
+ * pg_xlog has been renamed to pg_wal in version 10.
+ */
+#define MINIMUM_VERSION_FOR_PG_WAL      100000
+
 static int64 files = 0;
 static int64 blocks = 0;
 static int64 skippedblocks = 0;
@@ -83,13 +88,7 @@ pg_time_t	last_progress_update;
 pg_time_t	scan_started;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
-#if PG_VERSION_NUM < 100000
-#define MAXCMDLEN (2 * MAXPGPATH)
-char		initdb_path[MAXPGPATH];
 
-static void findInitDB(const char *argv0);
-static void syncDataDir(char *DataDir);
-#endif
 #if PG_VERSION_NUM < 90600
 static ControlFileData *getControlFile(char *DataDir);
 #endif
@@ -677,64 +676,213 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 /* syncDataDir() and findInitDB() are used on PostgreSQL releases < 10, only */
 #if PG_VERSION_NUM < 100000
 
-static void
-findInitDB(const char *argv0)
+/*
+ * fsync_fname -- Try to fsync a file or directory
+ *
+ * Ignores errors trying to open unreadable files, or trying to fsync
+ * directories on systems where that isn't allowed/required.  Reports
+ * other errors non-fatally.
+ */
+static int
+fsync_fname(const char *fname, bool isdir, const char *progname)
 {
-	int			ret;
+	int			fd;
+	int			flags;
+	int			returncode;
 
-	/* Locate initdb binary */
-	if ((ret = find_other_exec(argv0, "initdb",
-							   "initdb (PostgreSQL) " PG_VERSION "\n",
-							   initdb_path)) < 0)
+	/*
+	 * Some OSs require directories to be opened read-only whereas other
+	 * systems don't allow us to fsync files opened read-only; so we need both
+	 * cases here.  Using O_RDWR will cause us to fail to fsync files that are
+	 * not writable by our userid, but we assume that's OK.
+	 */
+	flags = PG_BINARY;
+	if (!isdir)
+		flags |= O_RDWR;
+	else
+		flags |= O_RDONLY;
+
+	/*
+	 * Open the file, silently ignoring errors about unreadable files (or
+	 * unsupported operations, e.g. opening a directory under Windows), and
+	 * logging others.
+	 */
+	fd = open(fname, flags, 0);
+	if (fd < 0)
 	{
-		char		full_path[MAXPGPATH];
-
-		if (find_my_exec(argv0, full_path) < 0)
-			strlcpy(full_path, progname, sizeof(full_path));
-
-		if (ret == -1)
-		{
-			fprintf(stderr, _("%s: program \"initdb\" not found\n"), progname);
-			exit(1);
-		}
-		else
-		{
-			fprintf(stderr, _("%s: program \"initdb\" has different version\n"), progname);
-			exit(1);
-		}
+		if (errno == EACCES || (isdir && errno == EISDIR))
+			return 0;
+		fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+				progname, fname, strerror(errno));
+		return -1;
 	}
 
-}
+	returncode = fsync(fd);
 
+	/*
+	 * Some OSes don't allow us to fsync directories at all, so we can ignore
+	 * those errors. Anything else needs to be reported.
+	 */
+	if (returncode != 0 && !(isdir && (errno == EBADF || errno == EINVAL)))
+	{
+		fprintf(stderr, _("%s: could not fsync file \"%s\": %s\n"),
+				progname, fname, strerror(errno));
+		(void) close(fd);
+		return -1;
+	}
+
+	(void) close(fd);
+	return 0;
+}
 /*
- * Sync target data directory to ensure that modifications are safely on disk.
+ * walkdir: recursively walk a directory, applying the action to each
+ * regular file and directory (including the named directory itself).
  *
- * We do this once, for the whole data directory, for performance reasons.  At
- * the end of pg_rewind's run, the kernel is likely to already have flushed
- * most dirty buffers to disk. Additionally initdb -S uses a two-pass approach
- * (only initiating writeback in the first pass), which often reduces the
- * overall amount of IO noticeably.
+ * If process_symlinks is true, the action and recursion are also applied
+ * to regular files and directories that are pointed to by symlinks in the
+ * given directory; otherwise symlinks are ignored.  Symlinks are always
+ * ignored in subdirectories, ie we intentionally don't pass down the
+ * process_symlinks flag to recursive calls.
+ *
+ * Errors are reported but not considered fatal.
+ *
+ * See also walkdir in fd.c, which is a backend version of this logic.
  */
 static void
-syncDataDir(char *DataDir)
+walkdir(const char *path,
+		int (*action) (const char *fname, bool isdir, const char *progname),
+		bool process_symlinks, const char *progname)
 {
-	char		cmd[MAXCMDLEN];
+	DIR		   *dir;
+	struct dirent *de;
 
-
-	/* Finally run initdb -S */
-	if (debug)
-		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S",
-				 initdb_path, DataDir);
-	else
-		snprintf(cmd, MAXCMDLEN, "\"%s\" -D \"%s\" -S > \"%s\"",
-				 initdb_path, DataDir, DEVNULL);
-
-	if (system(cmd) != 0)
+	dir = opendir(path);
+	if (dir == NULL)
 	{
-		fprintf(stderr, _("%s: sync of target directory failed\n"), progname);
-		exit(1);
+		fprintf(stderr, _("%s: could not open directory \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		return;
 	}
+
+	while (errno = 0, (de = readdir(dir)) != NULL)
+	{
+		char		subpath[MAXPGPATH * 2];
+		struct stat fst;
+		int			sret;
+
+		if (strcmp(de->d_name, ".") == 0 ||
+			strcmp(de->d_name, "..") == 0)
+			continue;
+
+		snprintf(subpath, sizeof(subpath), "%s/%s", path, de->d_name);
+
+		if (process_symlinks)
+			sret = stat(subpath, &fst);
+		else
+			sret = lstat(subpath, &fst);
+
+		if (sret < 0)
+		{
+			fprintf(stderr, _("%s: could not stat file \"%s\": %s\n"),
+					progname, subpath, strerror(errno));
+			continue;
+		}
+
+		if (S_ISREG(fst.st_mode))
+			(*action) (subpath, false, progname);
+		else if (S_ISDIR(fst.st_mode))
+			walkdir(subpath, action, false, progname);
+	}
+
+	if (errno)
+		fprintf(stderr, _("%s: could not read directory \"%s\": %s\n"),
+				progname, path, strerror(errno));
+
+	(void) closedir(dir);
+
+	/*
+	 * It's important to fsync the destination directory itself as individual
+	 * file fsyncs don't guarantee that the directory entry for the file is
+	 * synced.  Recent versions of ext4 have made the window much wider but
+	 * it's been an issue for ext3 and other filesystems in the past.
+	 */
+	(*action) (path, true, progname);
 }
+
+
+/*
+ * Issue fsync recursively on PGDATA and all its contents.
+ *
+ * We fsync regular files and directories wherever they are, but we follow
+ * symlinks only for pg_wal (or pg_xlog) and immediately under pg_tblspc.
+ * Other symlinks are presumed to point at files we're not responsible for
+ * fsyncing, and might not have privileges to write at all.
+ *
+ * serverVersion indicates the version of the server to be fsync'd.
+ *
+ * Errors are reported but not considered fatal.
+ */
+static void
+fsync_pgdata(const char *pg_data,
+			 const char *progname,
+			 int serverVersion)
+{
+	bool		xlog_is_symlink;
+	char		pg_wal[MAXPGPATH];
+	char		pg_tblspc[MAXPGPATH];
+
+	/* handle renaming of pg_xlog to pg_wal in post-10 clusters */
+	snprintf(pg_wal, MAXPGPATH, "%s/%s", pg_data,
+			 serverVersion < MINIMUM_VERSION_FOR_PG_WAL ? "pg_xlog" : "pg_wal");
+	snprintf(pg_tblspc, MAXPGPATH, "%s/pg_tblspc", pg_data);
+
+	/*
+	 * If pg_wal is a symlink, we'll need to recurse into it separately,
+	 * because the first walkdir below will ignore it.
+	 */
+	xlog_is_symlink = false;
+
+#ifndef WIN32
+	{
+		struct stat st;
+
+		if (lstat(pg_wal, &st) < 0)
+			fprintf(stderr, _("%s: could not stat file \"%s\": %s\n"),
+					progname, pg_wal, strerror(errno));
+		else if (S_ISLNK(st.st_mode))
+			xlog_is_symlink = true;
+	}
+#else
+	if (pgwin32_is_junction(pg_wal))
+		xlog_is_symlink = true;
+#endif
+
+	/*
+	 * If possible, hint to the kernel that we're soon going to fsync the data
+	 * directory and its contents.
+	 */
+#ifdef PG_FLUSH_DATA_WORKS
+	walkdir(pg_data, pre_sync_fname, false, progname);
+	if (xlog_is_symlink)
+		walkdir(pg_wal, pre_sync_fname, false, progname);
+	walkdir(pg_tblspc, pre_sync_fname, true, progname);
+#endif
+
+	/*
+	 * Now we do the fsync()s in the same order.
+	 *
+	 * The main call ignores symlinks, so in addition to specially processing
+	 * pg_wal if it's a symlink, pg_tblspc has to be visited separately with
+	 * process_symlinks = true.  Note that if there are any plain directories
+	 * in pg_tblspc, they'll get fsync'd twice.  That's not an expected case
+	 * so we don't worry about optimizing it.
+	 */
+	walkdir(pg_data, fsync_fname, false, progname);
+	if (xlog_is_symlink)
+		walkdir(pg_wal, fsync_fname, false, progname);
+	walkdir(pg_tblspc, fsync_fname, true, progname);
+}
+
 
 #endif
 
@@ -919,12 +1067,6 @@ main(int argc, char *argv[])
 
 	if (activate || verify)
 	{
-#if PG_VERSION_NUM < 100000
-		/* Check for initdb */
-		if (activate)
-			findInitDB(argv[0]);
-#endif
-
 		/*
 		 * Assign SIGUSR1 signal handler to toggle progress status information.
 		 */
@@ -990,11 +1132,7 @@ main(int argc, char *argv[])
 		else
 		{
 			printf(_("Syncing data directory\n"));
-#if PG_VERSION_NUM >= 100000
 			fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
-#else
-			syncDataDir(DataDir);
-#endif
 		}
 	}
 
