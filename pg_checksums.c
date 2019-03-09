@@ -62,6 +62,7 @@ extern char *optarg;
 #define MINIMUM_VERSION_FOR_PG_WAL      100000
 
 static int64 files = 0;
+static int64 skippedfiles = 0;
 static int64 blocks = 0;
 static int64 skippedblocks = 0;
 static int64 badblocks = 0;
@@ -282,43 +283,65 @@ scan_file(const char *fn, BlockNumber segmentno)
 			break;
 		if (r < 0)
 		{
+			skippedfiles++;
 			fprintf(stderr, _("%s: could not read block %u in file \"%s\": %s\n"),
 					progname, blockno, fn, strerror(errno));
 			return;
 		}
 		if (r != BLCKSZ)
 		{
-			if (block_retry)
+			if (online)
 			{
-				/* We already tried once to reread the block, bail out */
+				if (block_retry)
+				{
+					/* We already tried once to reread the block, skip to the next block */
+					skippedblocks++;
+					if (debug)
+						fprintf(stderr, _("%s: retrying block %d in file \"%s\" failed, skipping to next block\n"),
+								progname, blockno, fn);
+
+					if (lseek(f, BLCKSZ-r, SEEK_CUR) == -1)
+					{
+						fprintf(stderr, _("%s: could not lseek to next block in file \"%s\": %m\n"),
+								progname, fn);
+						return;
+					}
+					continue;
+				}
+
+				/*
+				 * Retry the block. It's possible that we read the block while it
+				 * was extended or shrinked, so it it ends up looking torn to us.
+				 */
+
+				/*
+				 * Seek back by the amount of bytes we read to the beginning of
+				 * the failed block.
+				 */
+				if (lseek(f, -r, SEEK_CUR) == -1)
+				{
+					skippedfiles++;
+					fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
+							progname, fn);
+					return;
+				}
+
+				/* Set flag so we know a retry was attempted */
+				block_retry = true;
+
+				/* Reset loop to validate the block again */
+				blockno--;
+
+				continue;
+			}
+			else
+			{
+				/* Directly skip file if offline */
+				skippedfiles++;
 				fprintf(stderr, _("%s: could not read block %u in file \"%s\": read %d of %d\n"),
 						progname, blockno, fn, r, BLCKSZ);
-				exit(1);
+				return;
 			}
-
-			/*
-			 * Retry the block. It's possible that we read the block while it
-			 * was extended or shrinked, so it it ends up looking torn to us.
-			 */
-
-			/*
-			 * Seek back by the amount of bytes we read to the beginning of
-			 * the failed block.
-			 */
-			if (lseek(f, -r, SEEK_CUR) == -1)
-			{
-				fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
-						progname, fn);
-				exit(1);
-			}
-
-			/* Set flag so we know a retry was attempted */
-			block_retry = true;
-
-			/* Reset loop to validate the block again */
-			blockno--;
-
-			continue;
 		}
 
 		/* New pages have no checksum yet */
@@ -353,9 +376,10 @@ scan_file(const char *fn, BlockNumber segmentno)
 					/* Seek to the beginning of the failed block */
 					if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
 					{
+						skippedfiles++;
 						fprintf(stderr, _("%s: could not lseek in file \"%s\": %m\n"),
 								progname, fn);
-						exit(1);
+						return;
 					}
 
 					/* Set flag so we know a retry was attempted */
@@ -1123,6 +1147,8 @@ main(int argc, char *argv[])
 		 */
 		printf(_("Checksum scan completed\n"));
 		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
+		if (skippedfiles > 0)
+			printf(_("Files skipped: %" INT64_MODIFIER "d\n"), skippedfiles);
 		printf(_("Blocks scanned: %" INT64_MODIFIER "d\n"), blocks);
 		if (skippedblocks > 0)
 			printf(_("Blocks skipped: %" INT64_MODIFIER "d\n"), skippedblocks);
@@ -1165,6 +1191,11 @@ main(int argc, char *argv[])
 
 	if (verify && badblocks > 0)
 		return 1;
+
+	/* skipped blocks or files are considered an error if offline */
+	if (!online)
+		if (skippedblocks > 0 || skippedfiles > 0)
+			return 1;
 
 	return 0;
 }

@@ -6,7 +6,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 49;
+use Test::More tests => 73;
 
 program_help_ok('pg_checksums');
 program_version_ok('pg_checksums');
@@ -159,11 +159,24 @@ sub fail_corrupt
 	my $file_name = "$pgdata/global/$file";
 	append_to_file $file_name, "foo";
 
+	$node->stop;
+	# If the instance is offline, the whole file is skipped and this is
+	# considered to be an error.
 	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
 						1,
-						[qr/^$/],
+						[qr/Files skipped:.*1/],
 						[qr/could not read block 0 in file.*$file\":/],
-						"fails for corrupted data in $file");
+						"skips file for corrupted data in $file when offline");
+
+	$node->start;
+	# If the instance is online, the block is skipped and this is not
+	# considered to be an error
+	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+						0,
+						[qr/Blocks skipped:.*1/],
+						[qr/^$/],
+						"skips block for corrupted data in $file when online");
+
 	# Remove file to prevent future lookup errors on conflicts.
 	unlink $file_name;
 	return;
@@ -179,3 +192,6 @@ fail_corrupt($node, "99990_vm");
 fail_corrupt($node, "99990_init.123");
 fail_corrupt($node, "99990_fsm.123");
 fail_corrupt($node, "99990_vm.123");
+
+# Stop node again at the end of tests
+$node->stop;
