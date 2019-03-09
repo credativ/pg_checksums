@@ -1,7 +1,7 @@
 /*
  * pg_checksums
  *
- * Activate/deactivate/verify data checksums
+ * Verifies/enables/disables data checksums
  *
  *	Copyright (c) 2010-2018, PostgreSQL Global Development Group
  *
@@ -72,11 +72,17 @@ static XLogRecPtr checkpointLSN;
 static char *only_relfilenode = NULL;
 static bool debug = false;
 static bool verbose = false;
-static bool verify = false;
-static bool activate = false;
-static bool deactivate = false;
 static bool show_progress = false;
 static bool online = false;
+
+typedef enum
+{
+        PG_ACTION_CHECK,
+        PG_ACTION_DISABLE,
+        PG_ACTION_ENABLE
+} ChecksumAction;
+
+static ChecksumAction action = PG_ACTION_CHECK;
 
 static const char *progname;
 
@@ -102,9 +108,9 @@ usage(void)
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
 	printf(_(" [-D, --pgdata=]DATADIR  data directory\n"));
-	printf(_("  -a,                    activate checksums\n"));
-	printf(_("  -b,                    deactivate checksums\n"));
-	printf(_("  -c,                    verify checksums\n"));
+	printf(_("  -a,                    enable data checksums\n"));
+	printf(_("  -b,                    disable data checksums\n"));
+	printf(_("  -c,                    check data checksums\n"));
 	printf(_("  -r relfilenode         check only relation with specified relfilenode\n"));
 	printf(_("  -d, --debug            debug output\n"));
 	printf(_("  -v, --verbose          output verbose messages\n"));
@@ -252,7 +258,11 @@ scan_file(const char *fn, BlockNumber segmentno)
 	BlockNumber	blockno;
 	bool		block_retry = false;
 
-	f = open(fn, O_RDWR | PG_BINARY, 0);
+	Assert(action == PG_ACTION_ENABLE ||
+		   action == PG_ACTION_CHECK);
+
+	f = open(fn, action == PG_ACTION_ENABLE ? O_RDWR : O_RDONLY | PG_BINARY, 0);
+
 	if (f < 0)
 	{
 		if (online && errno == ENOENT)
@@ -357,7 +367,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);
 		current_size += r;
 
-		if (verify)
+		if (action == PG_ACTION_CHECK)
 		{
 			if (csum != header->pd_checksum)
 			{
@@ -424,7 +434,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 			if (show_progress)
 				report_progress(false);
 		}
-		else if (activate)
+		else if (action == PG_ACTION_ENABLE)
 		{
 			if (debug)
 				fprintf(stderr, _("%s: checksum set in file \"%s\", block %d: %X\n"),
@@ -452,15 +462,12 @@ scan_file(const char *fn, BlockNumber segmentno)
 		}
 	}
 
-	if (verify)
+	if (verbose)
 	{
-		if (verbose)
+		if (action == PG_ACTION_CHECK)
 			fprintf(stderr, _("%s: checksums verified in file \"%s\"\n"), progname, fn);
-	}
-	else if (activate)
-	{
-		if (verbose)
-			fprintf(stderr, _("%s: checksums activated in file \"%s\"\n"), progname, fn);
+		if (action == PG_ACTION_ENABLE)
+			fprintf(stderr, _("%s: checksums enabled in file \"%s\"\n"), progname, fn);
 	}
 
 	close(f);
@@ -944,18 +951,18 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "D:abcr:dvP", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "D:abcdr:vP", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
 			case 'a':
-				activate = true;
+				action = PG_ACTION_ENABLE;
 				break;
 			case 'b':
-				deactivate = true;
+				action = PG_ACTION_DISABLE;
 				break;
 			case 'c':
-				verify = true;
+				action = PG_ACTION_CHECK;
 				break;
 			case 'd':
 				debug = true;
@@ -1010,11 +1017,11 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* Complain if no action has been requested */
-	if (!verify && !activate && !deactivate)
+	/* Relfilenode checking only works in check mode */
+	if (action != PG_ACTION_CHECK &&
+		only_relfilenode)
 	{
-		fprintf(stderr, _("%s: no action has been specified\n"),
-				progname);
+		fprintf(stderr, _("%s: relfilenode option only possible with check action\n"), progname);
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
 				progname);
 		exit(1);
@@ -1049,7 +1056,7 @@ main(int argc, char *argv[])
 	if (ControlFile->state != DB_SHUTDOWNED &&
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
 	{
-		if (!verify)
+		if (action != PG_ACTION_CHECK)
 		{
 			fprintf(stderr, _("%s: cluster must be shut down\n"), progname);
 			exit(1);
@@ -1065,13 +1072,22 @@ main(int argc, char *argv[])
 			fprintf(stderr, _("%s: offline mode\n"), progname);
 	}
 
-	if (ControlFile->data_checksum_version == 0 && !activate)
+	if (ControlFile->data_checksum_version == 0 &&
+		action == PG_ACTION_CHECK)
 	{
 		fprintf(stderr, _("%s: data checksums are not enabled in cluster\n"), progname);
 		exit(1);
 	}
 
-	if (ControlFile->data_checksum_version == 1 && activate)
+	if (ControlFile->data_checksum_version == 0 &&
+		action == PG_ACTION_DISABLE)
+	{
+		fprintf(stderr, _("%s: data checksums are already disabled in cluster\n"), progname);
+		exit(1);
+	}
+
+	if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION &&
+		action == PG_ACTION_ENABLE)
 	{
 		fprintf(stderr, _("%s: data checksums are already enabled in cluster\n"), progname);
 		exit(1);
@@ -1091,7 +1107,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	if (activate || verify)
+	if (action == PG_ACTION_CHECK || action == PG_ACTION_ENABLE)
 	{
 #ifndef WIN32
 		/*
@@ -1148,7 +1164,7 @@ main(int argc, char *argv[])
 		if (skippedblocks > 0)
 			printf(_("Blocks skipped: %" INT64_MODIFIER "d\n"), skippedblocks);
 
-		if (verify)
+		if (action == PG_ACTION_CHECK)
 		{
 			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
@@ -1162,21 +1178,18 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (activate || deactivate)
+	if (action == PG_ACTION_ENABLE || action == PG_ACTION_DISABLE)
 	{
 		/* Update control file */
-		if (activate)
-			ControlFile->data_checksum_version = 1;
-		else
-			ControlFile->data_checksum_version = 0;
+		ControlFile->data_checksum_version = action == PG_ACTION_ENABLE ? PG_DATA_CHECKSUM_VERSION : 0;
 		updateControlFile(DataDir, ControlFile);
 		fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
 		if (verbose)
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
-		if (activate)
-			printf(_("Checksums activated\n"));
+		if (action == PG_ACTION_ENABLE)
+			printf(_("Checksums enabled in cluster\n"));
 		else
-			printf(_("Checksums deactivated\n"));
+			printf(_("Checksums disabled in cluster\n"));
 	}
 
 	return 0;
