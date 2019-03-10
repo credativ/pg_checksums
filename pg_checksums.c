@@ -677,6 +677,9 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 	char		buffer[PG_CONTROL_FILE_SIZE];
 	char		ControlFilePath[MAXPGPATH];
 
+	Assert(action == PG_ACTION_ENABLE ||
+	       action == PG_ACTION_DISABLE);
+
 	/*
 	 * For good luck, apply the same static assertions as in backend's
 	 * WriteControlFile().
@@ -705,13 +708,7 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 
 	snprintf(ControlFilePath, sizeof(ControlFilePath), "%s/%s", DataDir, XLOG_CONTROL_FILE);
 
-	if (debug)
-		fprintf(stderr, _("%s: pg_control is file \"%s\"\n"), progname, ControlFilePath);
-
-	unlink(ControlFilePath);
-
-	fd = open(ControlFilePath,
-			  O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+	fd = open(ControlFilePath, O_WRONLY | PG_BINARY,
 			  pg_file_create_mode);
 	if (fd < 0)
 	{
@@ -1074,14 +1071,6 @@ main(int argc, char *argv[])
 	{
 		fprintf(stderr, _("%s: relfilenode option only possible with check action\n"), progname);
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
-				progname);
-		exit(1);
-	}
-
-	/* Disallow execution by the root user */
-	if (geteuid() == 0)
-	{
-		fprintf(stderr, _("%s: cannot be executed by \"root\"\n"),
 				progname);
 		exit(1);
 	}
