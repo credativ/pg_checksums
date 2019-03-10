@@ -66,6 +66,7 @@ static int64 skippedfiles = 0;
 static int64 blocks = 0;
 static int64 skippedblocks = 0;
 static int64 badblocks = 0;
+static int64 maxrate = 0;               /* no limit by default */
 static ControlFileData *ControlFile;
 static XLogRecPtr checkpointLSN;
 
@@ -115,6 +116,7 @@ usage(void)
 	printf(_("  -d, --debug            debug output\n"));
 	printf(_("  -v, --verbose          output verbose messages\n"));
 	printf(_("  -P, --progress         show progress information\n"));
+	printf(_("      --max-rate=RATE    maximum I/O rate to verify or enable checksums (in kB/s)\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
 	printf(_("  -?, --help             show this help, then exit\n"));
 	printf(_("\nIf no other action is specified, checksums are verified. If no "
@@ -199,18 +201,21 @@ toggle_progress_report(int signum)
 }
 
 /*
- * Report current progress status. Parts borrowed from
+ * Report current progress status and/or throttle. Parts borrowed from
  * PostgreSQLs' src/bin/pg_basebackup.c
  */
 static void
-report_progress(bool force)
+report_progress_or_throttle(bool force)
 {
 	pg_time_t	now = time(NULL);
 	int			total_percent = 0;
+	int			elapsed = 0;
+	int			wait = 0;
+	int64		current_rate = 0;
 
 	char		totalstr[32];
 	char		currentstr[32];
-	char		currspeedstr[32];
+	char		currratestr[32];
 
 	/* Make sure we report at most once a second */
 	if ((now == last_progress_update) && !force)
@@ -218,6 +223,9 @@ report_progress(bool force)
 
 	/* Save current time */
 	last_progress_update = now;
+
+	/* Elapsed time since start */
+	elapsed = now - scan_started;
 
 	/* Calculate current percent done, based on KiB... */
 	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
@@ -230,23 +238,52 @@ report_progress(bool force)
 	if (current_size > total_size)
 		total_size = current_size / 1024;
 
+	/* Current rate */
+	current_rate = (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started));
+
 	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
 			 total_size / 1024);
 	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
 			 current_size / 1024);
-	snprintf(currspeedstr, sizeof(currspeedstr), INT64_FORMAT,
-			 (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started)));
-	fprintf(stderr, "%s/%s kB (%d%%, %s kB/s)",
-			currentstr, totalstr, total_percent, currspeedstr);
+	snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
+			 current_rate);
 
 	/*
-	 * If we are reporting to a terminal, send a carriage return so that we
-	 * stay on the same line.  If not, send a newline.
+	 * Throttle if desired, but only after more than 1 second of operation
+	 * and 100 MB of data.
 	 */
-	if (isatty(fileno(stderr)))
-		fprintf(stderr, "\r");
-	else
-		fprintf(stderr, "\n");
+	if (maxrate > 0 && current_rate > maxrate && elapsed > 1 &&
+	    current_size > 10485760)
+	{
+		/* Calculate time to sleep */
+		wait = (current_size / 1024 / maxrate) - elapsed;
+		if (wait > 0)
+		{
+			if (debug)
+				fprintf(stderr, _("%s: waiting for %d seconds due to throttling\n"),
+						progname, wait);
+			pg_usleep(wait * 1000000);
+			/* Recalculate current rate */
+			snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
+				 (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started)));
+		}
+	}
+
+	/* Report progress if desired */
+	if (show_progress)
+	{
+		fprintf(stderr, "%s/%s kB (%d%%, %s kB/s)",
+				currentstr, totalstr, total_percent, currratestr);
+
+		/*
+		 * If we are reporting to a terminal, send a carriage return so that we
+		 * stay on the same line.  If not, send a newline.
+		 */
+		if (isatty(fileno(stderr)))
+			fprintf(stderr, "\r");
+		else
+			fprintf(stderr, "\n");
+	}
 }
 
 static void
@@ -436,8 +473,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 
 			block_retry = false;
 
-			if (show_progress)
-				report_progress(false);
+			if (show_progress || maxrate > 0)
+				report_progress_or_throttle(false);
 		}
 		else if (action == PG_ACTION_ENABLE)
 		{
@@ -462,8 +499,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 				exit(1);
 			}
 
-			if (show_progress)
-				report_progress(false);
+			if (show_progress || maxrate > 0)
+				report_progress_or_throttle(false);
 		}
 	}
 
@@ -928,6 +965,7 @@ main(int argc, char *argv[])
 		{"debug", no_argument, NULL, 'd'},
 		{"progress", no_argument, NULL, 'P'},
 		{"verbose", no_argument, NULL, 'v'},
+		{"max-rate", required_argument, NULL, 1},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -983,6 +1021,14 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				only_relfilenode = pstrdup(optarg);
+				break;
+			case 1:
+				if (atoi(optarg) == 0)
+				{
+					fprintf(stderr, _("%s: invalid max-rate specification, must be numeric: %s\n"), progname, optarg);
+					exit(1);
+				}
+				maxrate = atoi(optarg);
 				break;
 			case 'P':
 				show_progress = true;
@@ -1135,8 +1181,8 @@ main(int argc, char *argv[])
 		total_size += scan_directory(DataDir, "pg_tblspc", true);
 
 		/*
-		 * Remember start time. Required to calculate the current speed in
-		 * report_progress().
+		 * Remember start time. Required to calculate the current rate in
+		 * report_progress_or_throttle().
 		 */
 		if (debug)
 			fprintf(stderr, _("%s: starting scan\n"), progname);
@@ -1153,7 +1199,7 @@ main(int argc, char *argv[])
 		 */
 		if (show_progress)
 		{
-			report_progress(true);
+			report_progress_or_throttle(true);
 			if (isatty(fileno(stderr)))
 				fprintf(stderr, "\n");
 		}
