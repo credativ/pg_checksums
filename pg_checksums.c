@@ -103,7 +103,7 @@ static ControlFileData *getControlFile(char *DataDir);
 static void
 usage(void)
 {
-	printf(_("%s activates/deactivates/verifies page level checksums in PostgreSQL database cluster.\n\n"), progname);
+	printf(_("%s activates/deactivates/verifies page level checksums in PostgreSQL\ndatabase clusters.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
@@ -117,9 +117,9 @@ usage(void)
 	printf(_("  -P, --progress         show progress information\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
 	printf(_("  -?, --help             show this help, then exit\n"));
-	printf(_("\nOne of -a, -b or -c is mandatory. If no data directory "
-			 "(DATADIR) is specified,\nthe environment variable "
-			 "PGDATA is used.\n\n"));
+	printf(_("\nIf no other action is specified, checksums are verified. If no "
+			 "data directory\n(DATADIR) is specified, the environment "
+			 "variable PGDATA is used.\n\n"));
 	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
 }
 
