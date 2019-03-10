@@ -6,7 +6,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 73;
+use Test::More tests => 81;
 
 program_help_ok('pg_checksums');
 program_version_ok('pg_checksums');
@@ -14,8 +14,8 @@ program_options_handling_ok('pg_checksums');
 
 my $tempdir = TestLib::tempdir;
 
-# Initialize node
-my $node = get_new_node('main');
+# Initialize node with checksums disabled.
+my $node = get_new_node('node_checksum');
 $node->init;
 
 $node->start;
@@ -80,70 +80,86 @@ $node->stop;
 $node->command_ok(['pg_checksums', '-a', '-D', $pgdata],
         'pg_checksums are again activated in offline cluster');
 
-#exit 0;
 $node->start;
 
 $node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
         'pg_checksums can be verified in online cluster');
 
-# create table to corrupt and get their relfilenode
-create_corruption($node, 'corrupt1', 'pg_default');
+# Check corruption of table on default tablespace.
+check_relation_corruption($node, 'corrupt1', 'pg_default');
 
-$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
-        1,
-        [qr/Bad checksums:  1/s],
-        [qr/checksum verification failed/s],
-        'pg_checksums reports checksum mismatch'
-);
-
-# drop corrupt table again and make sure there is no more corruption
-$node->safe_psql('postgres', 'DROP TABLE corrupt1;');
-$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
-        'pg_checksums can be verified in online cluster: '.getcwd());
-
-
-# create table to corrupt in a non-default tablespace and get their relfilenode
-my $tablespace_dir = getcwd()."/tmp_check/ts_corrupt_dir";
+# Create tablespace to check corruptions in a non-default tablespace.
+my $basedir = $node->basedir;
+my $tablespace_dir = "$basedir/ts_corrupt_dir";
 mkdir ($tablespace_dir);
-$node->safe_psql('postgres', "CREATE TABLESPACE ts_corrupt LOCATION '".$tablespace_dir."';");
-create_corruption($node, 'corrupt2', 'ts_corrupt');
+$tablespace_dir = TestLib::real_dir($tablespace_dir);
+$node->safe_psql('postgres',
+    "CREATE TABLESPACE ts_corrupt LOCATION '$tablespace_dir';");
+check_relation_corruption($node, 'corrupt2', 'ts_corrupt');
 
-$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
-        1,
-        [qr/Bad checksums:  1/s],
-        [qr/checksum verification failed/s],
-        'pg_checksums reports checksum mismatch on non-default tablespace'
-);
-
-# drop corrupt table again and make sure there is no more corruption
-$node->safe_psql('postgres', 'DROP TABLE corrupt2;');
-$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
-        'pg_checksums can be verified in online cluster');
-
-# Utility routine to create a table with corrupted checksums.
-# It stops the node (if running), and starts it again.
-sub create_corruption
+# Utility routine to create and check a table with corrupted checksums
+# on a wanted tablespace.  Note that this stops and starts the node
+# multiple times to perform the checks, leaving the node started
+# at the end.
+sub check_relation_corruption
 {
 	my $node = shift;
 	my $table = shift;
 	my $tablespace = shift;
+	my $pgdata = $node->data_dir;
 
-	my $query = "SELECT a INTO ".$table." FROM generate_series(1,10000) AS a; ALTER TABLE ".$table." SET (autovacuum_enabled=false), SET TABLESPACE ".$tablespace."; SELECT pg_relation_filepath('".$table."')";
-	my $file_name = $node->safe_psql('postgres', $query);
+	$node->safe_psql('postgres',
+		"SELECT a INTO $table FROM generate_series(1,10000) AS a;
+		ALTER TABLE $table SET (autovacuum_enabled=false);");
+
+	$node->safe_psql('postgres',
+		"ALTER TABLE ".$table." SET TABLESPACE ".$tablespace.";");
+
+	my $file_corrupted = $node->safe_psql('postgres',
+		"SELECT pg_relation_filepath('$table');");
+	my $relfilenode_corrupted =  $node->safe_psql('postgres',
+		"SELECT relfilenode FROM pg_class WHERE relname = '$table';");
 
 	# set page header and block sizes
 	my $pageheader_size = 24;
 	my $block_size = $node->safe_psql('postgres', 'SHOW block_size;');
-
 	$node->stop;
 
-	open my $file, '+<', "$pgdata/$file_name";
+	# Checksums are correct for single relfilenode as the table is not
+	# corrupted yet.
+	command_ok(['pg_checksums',  '-c', '-D', $pgdata, '-r',
+			   $relfilenode_corrupted],
+		"succeeds for single relfilenode on tablespace $tablespace with offline cluster");
+
+	# Time to create some corruption
+	open my $file, '+<', "$pgdata/$file_corrupted";
 	seek($file, $pageheader_size, 0);
-	syswrite($file, '\0\0\0\0\0\0\0\0\0');
+	syswrite($file, "\0\0\0\0\0\0\0\0\0");
 	close $file;
 
-	$node->start;
+	# Checksum checks on single relfilenode fail
+	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata,
+							  '-r', $relfilenode_corrupted],
+							  1,
+							  [qr/Bad checksums:.*1/],
+							  [qr/checksum verification failed/],
+							  "fails with corrupted data for single relfilenode on tablespace $tablespace");
 
+	# Global checksum checks fail as well
+	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+							  1,
+							  [qr/Bad checksums:.*1/],
+							  [qr/checksum verification failed/],
+							  "fails with corrupted data for single relfilenode on tablespace $tablespace");
+
+	# Drop corrupted table again and make sure there is no more corruption.
+	$node->start;
+	$node->safe_psql('postgres', "DROP TABLE $table;");
+	$node->stop;
+	$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
+		"succeeds again after table drop on tablespace $tablespace");
+
+	$node->start;
 	return;
 }
 
