@@ -42,6 +42,8 @@ extern char *optarg;
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
 
+#define PG_CHECKSUMS_VERSION "0.8devel"
+
 #if PG_VERSION_NUM < 100000
 #define PG_CONTROL_FILE_SIZE PG_CONTROL_SIZE
 #endif
@@ -986,7 +988,7 @@ main(int argc, char *argv[])
 		}
 		if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
 		{
-			puts("pg_checksums (PostgreSQL) " PG_VERSION);
+			puts("pg_checksums " PG_CHECKSUMS_VERSION);
 			exit(0);
 		}
 	}
