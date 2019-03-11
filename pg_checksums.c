@@ -106,15 +106,17 @@ static ControlFileData *getControlFile(char *DataDir);
 static void
 usage(void)
 {
-	printf(_("%s enables/disables/verifies data checksums in PostgreSQL\ndatabase clusters.\n\n"), progname);
+	printf(_("%s enables, disables or verifies data checksums in a PostgreSQL\n"), progname);
+	printf(_("database cluster.\n\n"));
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
 	printf(_(" [-D, --pgdata=]DATADIR  data directory\n"));
-	printf(_("  -c, --check            check data checksums\n"));
+	printf(_("  -c, --check            check data checksums.  This is the default\n"));
+	printf(_("                         mode if nothing is specified.\n"));
 	printf(_("  -d, --disable          disable data checksums\n"));
 	printf(_("  -e, --enable           enable data checksums\n"));
-	printf(_("  -r relfilenode         check only relation with specified relfilenode\n"));
+	printf(_("  -r RELFILENODE         check only relation with specified relfilenode\n"));
 	printf(_("  -P, --progress         show progress information\n"));
 	printf(_("      --max-rate=RATE    maximum I/O rate to verify or enable checksums (in kB/s)\n"));
 	printf(_("      --debug            debug output\n"));
@@ -294,13 +296,15 @@ scan_file(const char *fn, BlockNumber segmentno)
 	PGAlignedBlock	buf;
 	PageHeader	header = (PageHeader) buf.data;
 	int			f;
+	int			flags;
 	BlockNumber	blockno;
 	bool		block_retry = false;
 
 	Assert(action == PG_ACTION_ENABLE ||
 		   action == PG_ACTION_CHECK);
 
-	f = open(fn, action == PG_ACTION_ENABLE ? O_RDWR : O_RDONLY | PG_BINARY, 0);
+	flags = (action == PG_ACTION_ENABLE) ? O_RDWR : O_RDONLY;
+	f = open(fn, PG_BINARY | flags, 0);
 
 	if (f < 0)
 	{
@@ -488,16 +492,17 @@ scan_file(const char *fn, BlockNumber segmentno)
 			header->pd_checksum = csum;
 
 			/* Seek back to beginning of block */
-			if (lseek(f, -BLCKSZ, SEEK_CUR) == -1)
+			if (lseek(f, -BLCKSZ, SEEK_CUR) < 0)
 			{
-				fprintf(stderr, _("%s: seek failed: %ld\n"), progname, lseek(f, 0, SEEK_CUR));
+				fprintf(stderr, _("%s: seek failed for block %d in file \"%s\": %s\n"), progname, blockno, fn, strerror(errno));
 				exit(1);
 			}
 
 			/* Write block with checksum */
-			if (write(f, buf.data, BLCKSZ) == -1)
+			if (write(f, buf.data, BLCKSZ) != BLCKSZ)
 			{
-				fprintf(stderr, _("%s: write failed: %s\n"), progname, strerror(errno));
+				fprintf(stderr, "%s: could not update checksum of block %d in file \"%s\": %s\n",
+						progname, blockno, fn, strerror(errno));
 				exit(1);
 			}
 
@@ -1080,7 +1085,7 @@ main(int argc, char *argv[])
 	if (action != PG_ACTION_CHECK &&
 		only_relfilenode)
 	{
-		fprintf(stderr, _("%s: relfilenode option only possible with check action\n"), progname);
+		fprintf(stderr, _("%s: relfilenode option only possible with --check\n"), progname);
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
 				progname);
 		exit(1);
@@ -1207,7 +1212,7 @@ main(int argc, char *argv[])
 		/*
 		 * Print summary and we're done.
 		 */
-		printf(_("Checksum scan completed\n"));
+		printf(_("Checksum operation completed\n"));
 		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
 		if (skippedfiles > 0)
 			printf(_("Files skipped: %" INT64_MODIFIER "d\n"), skippedfiles);
@@ -1232,7 +1237,8 @@ main(int argc, char *argv[])
 	if (action == PG_ACTION_ENABLE || action == PG_ACTION_DISABLE)
 	{
 		/* Update control file */
-		ControlFile->data_checksum_version = action == PG_ACTION_ENABLE ? PG_DATA_CHECKSUM_VERSION : 0;
+		ControlFile->data_checksum_version =
+			(action == PG_ACTION_ENABLE) ? PG_DATA_CHECKSUM_VERSION : 0;
 		updateControlFile(DataDir, ControlFile);
 		fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
 		if (verbose)
