@@ -43,7 +43,7 @@ extern char *optarg;
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
 
-#define PG_CHECKSUMS_VERSION "0.8devel"
+#define PG_CHECKSUMS_VERSION "0.9"
 
 #if PG_VERSION_NUM < 100000
 #define PG_CONTROL_FILE_SIZE PG_CONTROL_SIZE
