@@ -484,10 +484,6 @@ scan_file(const char *fn, BlockNumber segmentno)
 		}
 		else if (action == PG_ACTION_ENABLE)
 		{
-			if (debug)
-				fprintf(stderr, _("%s: checksum set in file \"%s\", block %d: %X\n"),
-						progname, fn, blockno, csum);
-
 			/* Set checksum in page header */
 			header->pd_checksum = csum;
 
