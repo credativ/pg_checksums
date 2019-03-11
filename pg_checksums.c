@@ -38,6 +38,7 @@ extern char *optarg;
 #if PG_VERSION_NUM >= 100000
 #include "common/file_utils.h"
 #endif
+#include "portability/instr_time.h"
 #include "storage/bufpage.h"
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
@@ -94,8 +95,8 @@ static const char *progname;
  */
 int64		total_size = 0;
 int64		current_size = 0;
-pg_time_t	last_progress_update;
-pg_time_t	scan_started;
+instr_time	last_progress_update;
+instr_time	scan_started;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 
@@ -211,25 +212,27 @@ toggle_progress_report(int signum)
 static void
 report_progress_or_throttle(bool force)
 {
-	pg_time_t	now = time(NULL);
+	instr_time	now;
+	double		elapsed;
+	int			wait;
 	int			total_percent = 0;
-	int			elapsed = 0;
-	int			wait = 0;
 	int64		current_rate = 0;
 
 	char		totalstr[32];
 	char		currentstr[32];
 	char		currratestr[32];
 
-	/* Make sure we report at most once a second */
-	if ((now == last_progress_update) && !force)
+	INSTR_TIME_SET_CURRENT(now);
+
+	/* Make sure we report at most once every tenth of a second */
+	if ((INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(last_progress_update) < 100) && !force)
 		return;
 
 	/* Save current time */
 	last_progress_update = now;
 
-	/* Elapsed time since start */
-	elapsed = now - scan_started;
+	/* Elapsed time in milliseconds since start of scan */
+	elapsed = INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(scan_started);
 
 	/* Calculate current percent done, based on KiB... */
 	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
@@ -242,8 +245,8 @@ report_progress_or_throttle(bool force)
 	if (current_size > total_size)
 		total_size = current_size / 1024;
 
-	/* Current rate */
-	current_rate = (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started));
+	/* Current rate in kB/s */
+	current_rate = (current_size / 1024) / ((elapsed / 1000) == 0 ? 1 : (elapsed / 1000));
 
 	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
 			 total_size / 1024);
@@ -252,25 +255,21 @@ report_progress_or_throttle(bool force)
 	snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
 			 current_rate);
 
-	/*
-	 * Throttle if desired, but only after more than 1 second of operation
-	 * and 100 MB of data.
-	 */
-	if (maxrate > 0 && current_rate > maxrate && elapsed > 1 &&
-	    current_size > 10485760)
+	/* Throttle if desired */
+	if (maxrate > 0 && current_rate > maxrate)
 	{
 		/* Calculate time to sleep */
-		wait = (current_size / 1024 / maxrate) - elapsed;
-		if (wait > 0)
-		{
-			if (debug)
-				fprintf(stderr, _("%s: waiting for %d seconds due to throttling\n"),
-						progname, wait);
-			pg_usleep(wait * 1000000);
-			/* Recalculate current rate */
-			snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
-				 (current_size / 1024) / (((time(NULL) - scan_started) == 0) ? 1 : (time(NULL) - scan_started)));
-		}
+		wait = (current_size / 1024 / (maxrate / 1000)) - elapsed;
+		if (debug)
+			fprintf(stderr, _("%s: waiting for %ld ms due to throttling\n"),
+					progname, wait);
+		pg_usleep(wait * 1000);
+		/* Recalculate current rate */
+		INSTR_TIME_SET_CURRENT(now);
+		elapsed = INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(scan_started);
+		current_rate = (current_size / 1024) / (elapsed / 1000);
+		snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
+			 current_rate);
 	}
 
 	/* Report progress if desired */
@@ -1187,7 +1186,7 @@ main(int argc, char *argv[])
 		 */
 		if (debug)
 			fprintf(stderr, _("%s: starting scan\n"), progname);
-		scan_started = time(NULL);
+		INSTR_TIME_SET_CURRENT(scan_started);
 
 		/* Operate on all files */
 		scan_directory(DataDir, "global", false);
