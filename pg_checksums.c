@@ -106,19 +106,19 @@ static ControlFileData *getControlFile(char *DataDir);
 static void
 usage(void)
 {
-	printf(_("%s activates/deactivates/verifies page level checksums in PostgreSQL\ndatabase clusters.\n\n"), progname);
+	printf(_("%s enables/disables/verifies data checksums in PostgreSQL\ndatabase clusters.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
 	printf(_(" [-D, --pgdata=]DATADIR  data directory\n"));
-	printf(_("  -a,                    enable data checksums\n"));
-	printf(_("  -b,                    disable data checksums\n"));
-	printf(_("  -c,                    check data checksums\n"));
+	printf(_("  -c, --check            check data checksums\n"));
+	printf(_("  -d, --disable          disable data checksums\n"));
+	printf(_("  -e, --enable           enable data checksums\n"));
 	printf(_("  -r relfilenode         check only relation with specified relfilenode\n"));
-	printf(_("  -d, --debug            debug output\n"));
-	printf(_("  -v, --verbose          output verbose messages\n"));
 	printf(_("  -P, --progress         show progress information\n"));
 	printf(_("      --max-rate=RATE    maximum I/O rate to verify or enable checksums (in kB/s)\n"));
+	printf(_("      --debug            debug output\n"));
+	printf(_("  -v, --verbose          output verbose messages\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
 	printf(_("  -?, --help             show this help, then exit\n"));
 	printf(_("\nIf no other action is specified, checksums are verified. If no "
@@ -960,11 +960,14 @@ int
 main(int argc, char *argv[])
 {
 	static struct option long_options[] = {
+		{"check", no_argument, NULL, 'c'},
 		{"pgdata", required_argument, NULL, 'D'},
-		{"debug", no_argument, NULL, 'd'},
-		{"progress", no_argument, NULL, 'P'},
+		{"disable", no_argument, NULL, 'd'},
+		{"enable", no_argument, NULL, 'e'},
 		{"verbose", no_argument, NULL, 'v'},
+		{"progress", no_argument, NULL, 'P'},
 		{"max-rate", required_argument, NULL, 1},
+		{"debug", no_argument, NULL, 2},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -993,7 +996,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "D:abcdr:vP", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "D:abcder:vP", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -1007,8 +1010,10 @@ main(int argc, char *argv[])
 				action = PG_ACTION_CHECK;
 				break;
 			case 'd':
-				debug = true;
-				verbose = true;
+				action = PG_ACTION_DISABLE;
+				break;
+			case 'e':
+				action = PG_ACTION_ENABLE;
 				break;
 			case 'D':
 				DataDir = optarg;
@@ -1021,6 +1026,9 @@ main(int argc, char *argv[])
 				}
 				only_relfilenode = pstrdup(optarg);
 				break;
+			case 'P':
+				show_progress = true;
+				break;
 			case 1:
 				if (atoi(optarg) == 0)
 				{
@@ -1029,8 +1037,9 @@ main(int argc, char *argv[])
 				}
 				maxrate = atoi(optarg);
 				break;
-			case 'P':
-				show_progress = true;
+			case 2:
+				debug = true;
+				verbose = true;
 				break;
 			case 'v':
 				verbose = true;
