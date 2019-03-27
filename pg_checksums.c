@@ -216,13 +216,12 @@ report_progress_or_throttle(bool force)
 	instr_time	now;
 	double		elapsed;
 	double		wait;
-	int			total_percent = 0;
-	int64		current_rate = 0;
+	double		total_percent;
+	double		current_rate;
 	bool		skip_progress = false;
 
 	char		totalstr[32];
 	char		currentstr[32];
-	char		currratestr[32];
 
 	INSTR_TIME_SET_CURRENT(now);
 
@@ -231,39 +230,37 @@ report_progress_or_throttle(bool force)
 		 INSTR_TIME_GET_MILLISEC(last_throttle) < 50) && !force)
 		return;
 
-	/* Make sure we report at most once every 400 milliseconds */
+	/* Make sure we report at most once every 250 milliseconds */
 	if ((INSTR_TIME_GET_MILLISEC(now) -
-		 INSTR_TIME_GET_MILLISEC(last_progress_update) < 400) && !force)
+		 INSTR_TIME_GET_MILLISEC(last_progress_update) < 250) && !force)
 		skip_progress = true;
 
 	/* Save current time */
 	last_throttle = now;
 
 	/* Elapsed time in milliseconds since start of scan */
-	elapsed = INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(scan_started);
+	elapsed = (INSTR_TIME_GET_MILLISEC(now) -
+			   INSTR_TIME_GET_MILLISEC(scan_started));
+
+	/* Adjust total size if current_size is larger */
+	if (current_size > total_size)
+		total_size = current_size;
 
 	/* Calculate current percent done */
-	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
-
-	/* Don't display larger than 100% */
-	if (total_percent > 100)
-		total_percent = 100;
+	total_percent = total_size ? 100.0 * current_size / total_size : 0.0;
 
 #define MEGABYTES (1024 * 1024)
 
-	/* The same for total size */
-	if (current_size > total_size)
-		total_size = current_size / MEGABYTES;
-
-	/* Current rate in MB/s */
-	current_rate = (int64)(current_size / MEGABYTES) / (elapsed / 1000);
+	/*
+	 * Calculate current speed, converting current_size from bytes to megabytes
+	 * and elapsed from milliseconds to seconds.
+	 */
+	current_rate = (current_size / MEGABYTES) / (elapsed / 1000);
 
 	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
 			 total_size / MEGABYTES);
 	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
 			 current_size / MEGABYTES);
-	snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
-			 current_rate);
 
 	/* Throttle if desired */
 	if (maxrate > 0 && current_rate > maxrate)
@@ -281,26 +278,20 @@ report_progress_or_throttle(bool force)
 		INSTR_TIME_SET_CURRENT(now);
 		elapsed = INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(scan_started);
 		current_rate = (int64)(current_size / MEGABYTES) / (elapsed / 1000);
-		current_rate = (current_size / 1024) / (elapsed / 1000);
-		snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
-			 current_rate);
-
 	}
 
-	/* Report progress every 400ms if desired */
+	/* Report progress if desired */
 	if (show_progress && !skip_progress)
 	{
-		fprintf(stderr, "%s/%s MB (%d%%, %s MB/s)",
-				currentstr, totalstr, total_percent, currratestr);
-
 		/*
-		 * If we are reporting to a terminal, send a carriage return so that we
-		 * stay on the same line.  If not, send a newline.
+		 * Print five blanks at the end so the end of previous lines which were
+		 * longer don't remain partly visible.
 		 */
-		if (isatty(fileno(stderr)))
-			fprintf(stderr, "\r");
-		else
-			fprintf(stderr, "\n");
+		fprintf(stderr, "%s/%s MB (%d%%, %.0f MB/s)%5s",
+				currentstr, totalstr, (int)total_percent, current_rate, "");
+
+		/* Stay on the same line if reporting to a terminal */
+		fprintf(stderr, isatty(fileno(stderr)) ? "\r" : "\n");
 		last_progress_update = now;
 	}
 }
@@ -516,8 +507,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 			}
 
 		}
-		/* Report progress or throttle every 100 blocks */
-		if ((blockno % 100 == 0) && (show_progress || maxrate > 0))
+		/* Report progress or throttle every 1024 blocks */
+		if ((show_progress || maxrate > 0) && (blockno % 1024 == 0))
 			report_progress_or_throttle(false);
 	}
 
