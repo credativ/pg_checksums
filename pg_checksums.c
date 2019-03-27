@@ -69,7 +69,7 @@ static int64 skippedfiles = 0;
 static int64 blocks = 0;
 static int64 skippedblocks = 0;
 static int64 badblocks = 0;
-static int64 maxrate = 0;               /* no limit by default */
+static double maxrate = 0;
 static ControlFileData *ControlFile;
 static XLogRecPtr checkpointLSN;
 
@@ -96,6 +96,7 @@ static const char *progname;
 int64		total_size = 0;
 int64		current_size = 0;
 instr_time	last_progress_update;
+instr_time	last_throttle;
 instr_time	scan_started;
 
 static void updateControlFile(char *DataDir, ControlFileData *ControlFile);
@@ -119,7 +120,7 @@ usage(void)
 	printf(_("  -e, --enable           enable data checksums\n"));
 	printf(_("  -r RELFILENODE         check only relation with specified relfilenode\n"));
 	printf(_("  -P, --progress         show progress information\n"));
-	printf(_("      --max-rate=RATE    maximum I/O rate to verify or enable checksums (in kB/s)\n"));
+	printf(_("      --max-rate=RATE    maximum I/O rate to verify or enable checksums (in MB/s)\n"));
 	printf(_("      --debug            debug output\n"));
 	printf(_("  -v, --verbose          output verbose messages\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
@@ -214,9 +215,10 @@ report_progress_or_throttle(bool force)
 {
 	instr_time	now;
 	double		elapsed;
-	int			wait;
+	double		wait;
 	int			total_percent = 0;
 	int64		current_rate = 0;
+	bool		skip_progress = false;
 
 	char		totalstr[32];
 	char		currentstr[32];
@@ -224,58 +226,71 @@ report_progress_or_throttle(bool force)
 
 	INSTR_TIME_SET_CURRENT(now);
 
-	/* Make sure we report at most once every tenth of a second */
-	if ((INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(last_progress_update) < 100) && !force)
+	/* Make sure we throttle at most once every 50 milliseconds */
+	if ((INSTR_TIME_GET_MILLISEC(now) -
+		 INSTR_TIME_GET_MILLISEC(last_throttle) < 50) && !force)
 		return;
 
+	/* Make sure we report at most once every 400 milliseconds */
+	if ((INSTR_TIME_GET_MILLISEC(now) -
+		 INSTR_TIME_GET_MILLISEC(last_progress_update) < 400) && !force)
+		skip_progress = true;
+
 	/* Save current time */
-	last_progress_update = now;
+	last_throttle = now;
 
 	/* Elapsed time in milliseconds since start of scan */
 	elapsed = INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(scan_started);
 
-	/* Calculate current percent done, based on KiB... */
+	/* Calculate current percent done */
 	total_percent = total_size ? (int64) ((current_size / 1024) * 100 / (total_size / 1024)) : 0;
 
 	/* Don't display larger than 100% */
 	if (total_percent > 100)
 		total_percent = 100;
 
+#define MEGABYTES (1024 * 1024)
+
 	/* The same for total size */
 	if (current_size > total_size)
-		total_size = current_size / 1024;
+		total_size = current_size / MEGABYTES;
 
-	/* Current rate in kB/s */
-	current_rate = (current_size / 1024) / ((elapsed / 1000) == 0 ? 1 : (elapsed / 1000));
+	/* Current rate in MB/s */
+	current_rate = (int64)(current_size / MEGABYTES) / (elapsed / 1000);
 
 	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
-			 total_size / 1024);
+			 total_size / MEGABYTES);
 	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
-			 current_size / 1024);
+			 current_size / MEGABYTES);
 	snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
 			 current_rate);
 
 	/* Throttle if desired */
 	if (maxrate > 0 && current_rate > maxrate)
 	{
-		/* Calculate time to sleep */
-		wait = (current_size / 1024 / (maxrate / 1000)) - elapsed;
+		/*
+		 * Calculate time to sleep in milliseconds.  Convert maxrate to MB/ms
+		 * in order to get a better resolution.
+		 */
+		wait = (current_size / MEGABYTES / (maxrate / 1000)) - elapsed;
 		if (debug)
-			fprintf(stderr, _("%s: waiting for %ld ms due to throttling\n"),
+			fprintf(stderr, _("%s: waiting for %f ms due to throttling\n"),
 					progname, wait);
 		pg_usleep(wait * 1000);
 		/* Recalculate current rate */
 		INSTR_TIME_SET_CURRENT(now);
 		elapsed = INSTR_TIME_GET_MILLISEC(now) - INSTR_TIME_GET_MILLISEC(scan_started);
+		current_rate = (int64)(current_size / MEGABYTES) / (elapsed / 1000);
 		current_rate = (current_size / 1024) / (elapsed / 1000);
 		snprintf(currratestr, sizeof(currratestr), INT64_FORMAT,
 			 current_rate);
+
 	}
 
-	/* Report progress if desired */
-	if (show_progress)
+	/* Report progress every 400ms if desired */
+	if (show_progress && !skip_progress)
 	{
-		fprintf(stderr, "%s/%s kB (%d%%, %s kB/s)",
+		fprintf(stderr, "%s/%s MB (%d%%, %s MB/s)",
 				currentstr, totalstr, total_percent, currratestr);
 
 		/*
@@ -286,6 +301,7 @@ report_progress_or_throttle(bool force)
 			fprintf(stderr, "\r");
 		else
 			fprintf(stderr, "\n");
+		last_progress_update = now;
 	}
 }
 
@@ -478,8 +494,6 @@ scan_file(const char *fn, BlockNumber segmentno)
 
 			block_retry = false;
 
-			if (show_progress || maxrate > 0)
-				report_progress_or_throttle(false);
 		}
 		else if (action == PG_ACTION_ENABLE)
 		{
@@ -501,9 +515,10 @@ scan_file(const char *fn, BlockNumber segmentno)
 				exit(1);
 			}
 
-			if (show_progress || maxrate > 0)
-				report_progress_or_throttle(false);
 		}
+		/* Report progress or throttle every 100 blocks */
+		if ((blockno % 100 == 0) && (show_progress || maxrate > 0))
+			report_progress_or_throttle(false);
 	}
 
 	if (verbose)
@@ -513,6 +528,10 @@ scan_file(const char *fn, BlockNumber segmentno)
 		if (action == PG_ACTION_ENABLE)
 			fprintf(stderr, _("%s: checksums enabled in file \"%s\"\n"), progname, fn);
 	}
+
+	/* Make sure progress is reported at least once per file */
+	if (show_progress || maxrate > 0)
+		report_progress_or_throttle(false);
 
 	close(f);
 }
@@ -1030,12 +1049,12 @@ main(int argc, char *argv[])
 				show_progress = true;
 				break;
 			case 1:
-				if (atoi(optarg) == 0)
+				if (atof(optarg) == 0)
 				{
 					fprintf(stderr, _("%s: invalid max-rate specification, must be numeric: %s\n"), progname, optarg);
 					exit(1);
 				}
-				maxrate = atoi(optarg);
+				maxrate = atof(optarg);
 				break;
 			case 2:
 				debug = true;
