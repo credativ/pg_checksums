@@ -6,7 +6,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 81;
+use Test::More tests => 121;
 
 program_help_ok('pg_checksums');
 program_version_ok('pg_checksums');
@@ -85,8 +85,12 @@ $node->start;
 $node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
         'pg_checksums can be verified in online cluster');
 
+# Set page header and block size
+my $pageheader_size = 24;
+my $block_size = $node->safe_psql('postgres', 'SHOW block_size;');
+
 # Check corruption of table on default tablespace.
-check_relation_corruption($node, 'corrupt1', 'pg_default');
+check_relation_corruption($node, 'corrupt1', 'pg_default', $pageheader_size, "\0\0\0\0\0\0\0\0\0", "on tablespace pg_default");
 
 # Create tablespace to check corruptions in a non-default tablespace.
 my $basedir = $node->basedir;
@@ -95,7 +99,15 @@ mkdir ($tablespace_dir);
 $tablespace_dir = TestLib::real_dir($tablespace_dir);
 $node->safe_psql('postgres',
     "CREATE TABLESPACE ts_corrupt LOCATION '$tablespace_dir';");
-check_relation_corruption($node, 'corrupt2', 'ts_corrupt');
+check_relation_corruption($node, 'corrupt2', 'ts_corrupt', $pageheader_size, "\0\0\0\0\0\0\0\0\0", "on tablespace ts_corrupt");
+
+# Check corruption in the pageheader with random data in it
+my $random_data = join '', map { ("a".."z")[rand 26] } 1 .. $pageheader_size;
+check_relation_corruption($node, 'corrupt1', 'pg_default', 0, $random_data, "with random data in pageheader");
+
+# Check corruption when the pageheader has been zeroed-out completely
+my $zero_data = "\0"x$pageheader_size;
+check_relation_corruption($node, 'corrupt1', 'pg_default', 0, $zero_data, "with zeroed-out pageheader");
 
 # Utility routine to create and check a table with corrupted checksums
 # on a wanted tablespace.  Note that this stops and starts the node
@@ -106,6 +118,9 @@ sub check_relation_corruption
 	my $node = shift;
 	my $table = shift;
 	my $tablespace = shift;
+	my $offset = shift;
+	my $corrupted_data = shift;
+	my $description = shift;
 	my $pgdata = $node->data_dir;
 
 	$node->safe_psql('postgres',
@@ -120,21 +135,18 @@ sub check_relation_corruption
 	my $relfilenode_corrupted =  $node->safe_psql('postgres',
 		"SELECT relfilenode FROM pg_class WHERE relname = '$table';");
 
-	# set page header and block sizes
-	my $pageheader_size = 24;
-	my $block_size = $node->safe_psql('postgres', 'SHOW block_size;');
 	$node->stop;
 
 	# Checksums are correct for single relfilenode as the table is not
 	# corrupted yet.
 	command_ok(['pg_checksums',  '-c', '-D', $pgdata, '-r',
 			   $relfilenode_corrupted],
-		"succeeds for single relfilenode on tablespace $tablespace with offline cluster");
+		"succeeds for single relfilenode $description with offline cluster");
 
 	# Time to create some corruption
 	open my $file, '+<', "$pgdata/$file_corrupted";
-	seek($file, $pageheader_size, 0);
-	syswrite($file, "\0\0\0\0\0\0\0\0\0");
+	seek($file, $offset, 0);
+	syswrite($file, $corrupted_data);
 	close $file;
 
 	# Checksum checks on single relfilenode fail
@@ -143,7 +155,25 @@ sub check_relation_corruption
 							  1,
 							  [qr/Bad checksums:.*1/],
 							  [qr/checksum verification failed/],
+							  "fails with corrupted data $description");
+
+	# Global checksum checks fail as well
+	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+							  1,
+							  [qr/Bad checksums:.*1/],
+							  [qr/checksum verification failed/],
 							  "fails with corrupted data for single relfilenode on tablespace $tablespace");
+
+	# Now check online as well
+	$node->start;
+
+	# Checksum checks on single relfilenode fail
+	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata,
+							  '-r', $relfilenode_corrupted],
+							  1,
+							  [qr/Bad checksums:.*1/],
+							  [qr/checksum verification failed/],
+							  "fails with corrupted data $description");
 
 	# Global checksum checks fail as well
 	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
@@ -153,13 +183,9 @@ sub check_relation_corruption
 							  "fails with corrupted data for single relfilenode on tablespace $tablespace");
 
 	# Drop corrupted table again and make sure there is no more corruption.
-	$node->start;
 	$node->safe_psql('postgres', "DROP TABLE $table;");
-	$node->stop;
 	$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
 		"succeeds again after table drop on tablespace $tablespace");
-
-	$node->start;
 	return;
 }
 
@@ -198,8 +224,9 @@ sub fail_corrupt
 	return;
 }
 
-# Authorized relation files filled with corrupted data cause the
-# checksum checks to fail.
+# Authorized relation files filled with corrupted data cause the files to be
+# skipped and, if the instance is offline, a non-zero exit status.  Make sure
+# to use file names different than the previous ones.
 fail_corrupt($node, "99990");
 fail_corrupt($node, "99990.123");
 fail_corrupt($node, "99990_fsm");

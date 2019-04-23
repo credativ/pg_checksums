@@ -79,6 +79,8 @@ static bool verbose = false;
 static bool show_progress = false;
 static bool online = false;
 
+static char *DataDir = NULL;
+
 typedef enum
 {
         PG_ACTION_CHECK,
@@ -197,6 +199,22 @@ isRelFileName(const char *fn)
 }
 
 static void
+update_checkpoint_lsn(void)
+{
+	bool	crc_ok;
+
+	ControlFile = get_controlfile(DataDir, progname, &crc_ok);
+	if (!crc_ok)
+	{
+		fprintf(stderr, _("%s: pg_control CRC value is incorrect\n"), progname);
+		exit(1);
+	}
+
+	/* Update checkpointLSN with the current value */
+	checkpointLSN = ControlFile->checkPoint;
+}
+
+static void
 toggle_progress_report(int signum)
 {
 
@@ -305,6 +323,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 	int			flags;
 	BlockNumber	blockno;
 	bool		block_retry = false;
+	bool		all_zeroes;
+	size_t	       *pagebytes;
 
 	Assert(action == PG_ACTION_ENABLE ||
 		   action == PG_ACTION_CHECK);
@@ -401,17 +421,37 @@ scan_file(const char *fn, BlockNumber segmentno)
 			}
 		}
 
+		blocks++;
+
 		/* New pages have no checksum yet */
 		if (PageIsNew(header))
 		{
-			if (debug && block_retry)
-				fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
-						progname, blockno, fn);
-			skippedblocks++;
+			/* Check for an all-zeroes page */
+			all_zeroes = true;
+			pagebytes = (size_t *) buf.data;
+			for (int i = 0; i < (BLCKSZ / sizeof(size_t)); i++)
+			{
+				if (pagebytes[i] != 0)
+				{
+					all_zeroes = false;
+					break;
+				}
+			}
+			if (!all_zeroes)
+			{
+				fprintf(stderr, _("%s: checksum verification failed in file \"%s\", block %u: pd_upper is zero but block is not all-zero\n"),
+						progname, fn, blockno);
+				badblocks++;
+			}
+			else
+			{
+				if (debug && block_retry)
+					fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
+							progname, blockno, fn);
+				skippedblocks++;
+			}
 			continue;
 		}
-
-		blocks++;
 
 		csum = pg_checksum_page(buf.data, blockno + segmentno * RELSEG_SIZE);
 		current_size += r;
@@ -452,7 +492,16 @@ scan_file(const char *fn, BlockNumber segmentno)
 
 						/* Reset loop to validate the block again */
 						blockno--;
+						blocks--;
 						current_size -= r;
+
+						/*
+						 * Update the checkpoint LSN now. If we get a failure
+						 * on re-read, we would need to do this anyway, and
+						 * doing it now lowers the probability that we see the
+						 * same torn page on re-read.
+						 */
+						update_checkpoint_lsn();
 
 						continue;
 					}
@@ -460,15 +509,17 @@ scan_file(const char *fn, BlockNumber segmentno)
 					/*
 					 * The checksum verification failed on retry as well.  Check if
 					 * the page has been modified since the checkpoint and skip it
-					 * in this case.
+					 * in this case. As a sanity check, demand that the upper
+					 * 32 bits of the LSN are identical in order to skip as a
+					 * guard against a corrupted LSN in the pageheader.
 					 */
-					if (PageGetLSN(buf.data) > checkpointLSN)
+					if ((PageGetLSN(buf.data) > checkpointLSN) &&
+						(PageGetLSN(buf.data) >> 32 == checkpointLSN >> 32))
 					{
 						if (debug)
 							fprintf(stderr, _("%s: block %d in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
 									progname, blockno, fn, (uint32) (PageGetLSN(buf.data) >> 32), (uint32) PageGetLSN(buf.data), (uint32) (checkpointLSN >> 32), (uint32) checkpointLSN);
 						block_retry = false;
-						blocks--;
 						skippedblocks++;
 						continue;
 					}
@@ -981,7 +1032,6 @@ main(int argc, char *argv[])
 		{NULL, 0, NULL, 0}
 	};
 
-	char	   *DataDir = NULL;
 	int			c;
 	int			option_index;
 #if PG_VERSION_NUM >= 100000
