@@ -203,12 +203,18 @@ update_checkpoint_lsn(void)
 {
 	bool	crc_ok;
 
+#if PG_VERSION_NUM >= 100000
 	ControlFile = get_controlfile(DataDir, progname, &crc_ok);
 	if (!crc_ok)
 	{
 		fprintf(stderr, _("%s: pg_control CRC value is incorrect\n"), progname);
 		exit(1);
 	}
+#elif PG_VERSION_NUM >= 90600
+	ControlFile = get_controlfile(DataDir, progname);
+#else
+	ControlFile = getControlFile(DataDir);
+#endif
 
 	/* Update checkpointLSN with the current value */
 	checkpointLSN = ControlFile->checkPoint;
