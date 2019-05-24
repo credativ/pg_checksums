@@ -38,6 +38,9 @@ extern char *optarg;
 #if PG_VERSION_NUM >= 100000
 #include "common/file_utils.h"
 #endif
+#if PG_VERSION_NUM >= 120000
+#include "common/logging.h"
+#endif
 #include "portability/instr_time.h"
 #include "storage/bufpage.h"
 #include "storage/checksum.h"
@@ -204,7 +207,11 @@ update_checkpoint_lsn(void)
 	bool	crc_ok;
 
 #if PG_VERSION_NUM >= 100000
+#if PG_VERSION_NUM >= 120000
+	ControlFile = get_controlfile(DataDir, &crc_ok);
+#else
 	ControlFile = get_controlfile(DataDir, progname, &crc_ok);
+#endif
 	if (!crc_ok)
 	{
 		fprintf(stderr, _("%s: pg_control CRC value is incorrect\n"), progname);
@@ -1044,8 +1051,10 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 #endif
 
+#if PG_VERSION_NUM >= 120000
+	pg_logging_init(argv[0]);
+#endif
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
-
 	progname = get_progname(argv[0]);
 
 	if (argc > 1)
@@ -1154,7 +1163,11 @@ main(int argc, char *argv[])
 
 	/* Check if cluster is running */
 #if PG_VERSION_NUM >= 100000
+#if PG_VERSION_NUM >= 120000
+	ControlFile = get_controlfile(DataDir, &crc_ok);
+#else
 	ControlFile = get_controlfile(DataDir, progname, &crc_ok);
+#endif
 	if (!crc_ok)
 	{
 		fprintf(stderr, _("%s: pg_control CRC value is incorrect\n"), progname);
@@ -1301,7 +1314,11 @@ main(int argc, char *argv[])
 		ControlFile->data_checksum_version =
 			(action == PG_ACTION_ENABLE) ? PG_DATA_CHECKSUM_VERSION : 0;
 		updateControlFile(DataDir, ControlFile);
+#if PG_VERSION_NUM >= 120000
+		fsync_pgdata(DataDir, PG_VERSION_NUM);
+#else
 		fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
+#endif
 		if (verbose)
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
 		if (action == PG_ACTION_ENABLE)
