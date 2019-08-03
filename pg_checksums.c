@@ -7,6 +7,9 @@
  *
  *	pg_checksums.c
  */
+
+#define PG_CHECKSUMS_VERSION "0.11devel"
+
 #include "postgres_fe.h"
 
 #include "port.h"
@@ -22,8 +25,6 @@
 #include "storage/bufpage.h"
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
-
-#define PG_CHECKSUMS_VERSION "0.11devel"
 
 
 static int64 files = 0;
