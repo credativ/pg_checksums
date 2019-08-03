@@ -17,7 +17,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "postgres.h"
 #include "catalog/pg_control.h"
 #include "portability/instr_time.h"
 #include "storage/bufpage.h"
@@ -119,6 +118,22 @@ update_checkpoint_lsn(void)
 	checkpointLSN = ControlFile->checkPoint;
 }
 
+/*
+ * List of files excluded from checksum validation.
+ *
+ */
+static const char *const skip[] = {
+        "pg_control",
+        "pg_filenode.map",
+        "pg_internal.init",
+        "PG_VERSION",
+#ifdef EXEC_BACKEND
+        "config_exec_params",
+        "config_exec_params.new",
+#endif
+        NULL,
+};
+
 static void
 toggle_progress_report(int signum)
 {
@@ -217,6 +232,19 @@ report_progress_or_throttle(bool force)
 		fprintf(stderr, isatty(fileno(stderr)) ? "\r" : "\n");
 		last_progress_update = now;
 	}
+}
+
+
+static bool
+skipfile(const char *fn)
+{
+	const char *const *f;
+
+	for (f = skip; *f; f++)
+		if (strcmp(*f, fn) == 0)
+			return true;
+
+	return false;
 }
 
 static void
@@ -543,11 +571,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 					   *segmentpath;
 			BlockNumber	segmentno = 0;
 
-			/*
-			 * Only normal relation files can be analyzed.  Note that this
-			 * skips temporary relations.
-			 */
-			if (!isRelFileName(de->d_name))
+			if (skipfile(de->d_name))
 				continue;
 
 			/*

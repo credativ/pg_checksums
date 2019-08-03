@@ -71,7 +71,6 @@ extern char *DataDir;
 
 static const char *progname;
 
-bool isRelFileName(const char *fn);
 void updateControlFile(char *DataDir, ControlFileData *ControlFile);
 
 #if PG_VERSION_NUM < 90600
