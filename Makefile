@@ -13,7 +13,7 @@ PGFILEDESC = "pg_checksums - Activate/deactivate/verify data checksums in an off
 PGAPPICON=win32
 
 
-OBJS= pg_checksums.o $(WIN32RES)
+OBJS= pg_checksums.o port.o $(WIN32RES)
 EXTRA_CLEAN = tmp_check
 
 PG_CONFIG ?= pg_config
