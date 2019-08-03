@@ -601,11 +601,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 				*segmentpath++ = '\0';
 				segmentno = atoi(segmentpath);
 				if (segmentno == 0)
-				{
-					fprintf(stderr, _("%s: invalid segment number %d in file name \"%s\"\n"),
-							progname, segmentno, fn);
-					exit(1);
-				}
+					continue;
 			}
 
 			forkpath = strchr(fnonly, '_');
