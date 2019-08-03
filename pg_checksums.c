@@ -11,7 +11,7 @@
  *-------------------------------------------------------------------------
  */
 
-#define PG_CHECKSUMS_VERSION "0.11devel"
+#define PG_CHECKSUMS_VERSION "0.11"
 
 #include "postgres_fe.h"
 
