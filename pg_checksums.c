@@ -101,7 +101,6 @@ usage(void)
 
 /*
  * List of files excluded from checksum validation.
- *
  */
 static const char *const skip[] = {
 	"pg_control",
@@ -241,7 +240,6 @@ report_progress_or_throttle(bool force)
 		last_progress_update = now;
 	}
 }
-
 
 static bool
 skipfile(const char *fn)
@@ -495,7 +493,6 @@ scan_file(const char *fn, BlockNumber segmentno)
 						progname, blockno, fn, strerror(errno));
 				exit(1);
 			}
-
 		}
 
 		/* Report progress or throttle every 1024 blocks */
