@@ -25,8 +25,6 @@
 
 #define PG_CHECKSUMS_VERSION "0.11devel"
 
-#define PG_TEMP_FILES_DIR "pgsql_tmp"
-#define PG_TEMP_FILE_PREFIX "pgsql_tmp"
 
 static int64 files = 0;
 static int64 skippedfiles = 0;
@@ -47,10 +45,20 @@ char *DataDir = NULL;
 
 typedef enum
 {
-        PG_MODE_CHECK,
-        PG_MODE_DISABLE,
-        PG_MODE_ENABLE
+	PG_MODE_CHECK,
+	PG_MODE_DISABLE,
+	PG_MODE_ENABLE
 } PgChecksumMode;
+
+/*
+ * Filename components.
+ *
+ * XXX: fd.h is not declared here as frontend side code is not able to
+ * interact with the backend-side definitions for the various fsync
+ * wrappers.
+ */
+#define PG_TEMP_FILES_DIR "pgsql_tmp"
+#define PG_TEMP_FILE_PREFIX "pgsql_tmp"
 
 static PgChecksumMode mode = PG_MODE_CHECK;
 
@@ -74,8 +82,7 @@ usage(void)
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
 	printf(_(" [-D, --pgdata=]DATADIR  data directory\n"));
-	printf(_("  -c, --check            check data checksums.  This is the default\n"));
-	printf(_("                         mode if nothing is specified.\n"));
+	printf(_("  -c, --check            check data checksums (default)\n"));
 	printf(_("  -d, --disable          disable data checksums\n"));
 	printf(_("  -e, --enable           enable data checksums\n"));
 	printf(_("  -r RELFILENODE         check only relation with specified relfilenode\n"));
@@ -85,11 +92,26 @@ usage(void)
 	printf(_("  -v, --verbose          output verbose messages\n"));
 	printf(_("  -V, --version          output version information, then exit\n"));
 	printf(_("  -?, --help             show this help, then exit\n"));
-	printf(_("\nIf no other action is specified, checksums are verified. If no "
-			 "data directory\n(DATADIR) is specified, the environment "
+	printf(_("\nIf no data directory (DATADIR) is specified, the environment "
 			 "variable PGDATA is used.\n\n"));
 	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
 }
+
+/*
+ * List of files excluded from checksum validation.
+ *
+ */
+static const char *const skip[] = {
+	"pg_control",
+	"pg_filenode.map",
+	"pg_internal.init",
+	"PG_VERSION",
+#ifdef EXEC_BACKEND
+	"config_exec_params",
+	"config_exec_params.new",
+#endif
+	NULL,
+};
 
 static void
 update_checkpoint_lsn(void)
@@ -117,22 +139,6 @@ update_checkpoint_lsn(void)
 	/* Update checkpointLSN with the current value */
 	checkpointLSN = ControlFile->checkPoint;
 }
-
-/*
- * List of files excluded from checksum validation.
- *
- */
-static const char *const skip[] = {
-        "pg_control",
-        "pg_filenode.map",
-        "pg_internal.init",
-        "PG_VERSION",
-#ifdef EXEC_BACKEND
-        "config_exec_params",
-        "config_exec_params.new",
-#endif
-        NULL,
-};
 
 static void
 toggle_progress_report(int signum)
@@ -250,14 +256,14 @@ skipfile(const char *fn)
 static void
 scan_file(const char *fn, BlockNumber segmentno)
 {
-	PGAlignedBlock	buf;
+	PGAlignedBlock buf;
 	PageHeader	header = (PageHeader) buf.data;
 	int			f;
+	BlockNumber blockno;
 	int			flags;
-	BlockNumber	blockno;
 	bool		block_retry = false;
 	bool		all_zeroes;
-	size_t	       *pagebytes;
+	size_t	    *pagebytes;
 
 	Assert(mode == PG_MODE_ENABLE ||
 		   mode == PG_MODE_CHECK);
@@ -286,7 +292,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 		int			r = read(f, buf.data, BLCKSZ);
 
 		if (debug && block_retry)
-			fprintf(stderr, _("%s: retrying block %d in file \"%s\"\n"),
+			fprintf(stderr, _("%s: retrying block %u in file \"%s\"\n"),
 					progname, blockno, fn);
 
 		if (r == 0)
@@ -307,7 +313,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 					/* We already tried once to reread the block, skip to the next block */
 					skippedblocks++;
 					if (debug)
-						fprintf(stderr, _("%s: retrying block %d in file \"%s\" failed, skipping to next block\n"),
+						fprintf(stderr, _("%s: retrying block %u in file \"%s\" failed, skipping to next block\n"),
 								progname, blockno, fn);
 
 					if (lseek(f, BLCKSZ-r, SEEK_CUR) == -1)
@@ -378,7 +384,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 			else
 			{
 				if (debug && block_retry)
-					fprintf(stderr, _("%s: block %d in file \"%s\" is new, ignoring\n"),
+					fprintf(stderr, _("%s: block %u in file \"%s\" is new, ignoring\n"),
 							progname, blockno, fn);
 				skippedblocks++;
 			}
@@ -418,7 +424,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 						block_retry = true;
 
 						if (debug)
-							fprintf(stderr, _("%s: checksum verification failed on first attempt in file \"%s\", block %d: calculated checksum %X but block contains %X\n"),
+							fprintf(stderr, _("%s: checksum verification failed on first attempt in file \"%s\", block %u: calculated checksum %X but block contains %X\n"),
 									progname, fn, blockno, csum, header->pd_checksum);
 
 						/* Reset loop to validate the block again */
@@ -448,7 +454,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 						(PageGetLSN(buf.data) >> 32 == checkpointLSN >> 32))
 					{
 						if (debug)
-							fprintf(stderr, _("%s: block %d in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
+							fprintf(stderr, _("%s: block %u in file \"%s\" with LSN %X/%X is newer than checkpoint LSN %X/%X, ignoring\n"),
 									progname, blockno, fn, (uint32) (PageGetLSN(buf.data) >> 32), (uint32) PageGetLSN(buf.data), (uint32) (checkpointLSN >> 32), (uint32) checkpointLSN);
 						block_retry = false;
 						skippedblocks++;
@@ -457,12 +463,12 @@ scan_file(const char *fn, BlockNumber segmentno)
 				}
 
 				if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION)
-					fprintf(stderr, _("%s: checksum verification failed in file \"%s\", block %d: calculated checksum %X but block contains %X\n"),
+					fprintf(stderr, _("%s: checksum verification failed in file \"%s\", block %u: calculated checksum %X but block contains %X\n"),
 							progname, fn, blockno, csum, header->pd_checksum);
 				badblocks++;
 			}
 			else if (block_retry && debug)
-				fprintf(stderr, _("%s: block %d in file \"%s\" verified ok on recheck\n"),
+				fprintf(stderr, _("%s: block %u in file \"%s\" verified ok on recheck\n"),
 						progname, blockno, fn);
 
 			block_retry = false;
@@ -476,19 +482,20 @@ scan_file(const char *fn, BlockNumber segmentno)
 			/* Seek back to beginning of block */
 			if (lseek(f, -BLCKSZ, SEEK_CUR) < 0)
 			{
-				fprintf(stderr, _("%s: seek failed for block %d in file \"%s\": %s\n"), progname, blockno, fn, strerror(errno));
+				fprintf(stderr, _("%s: seek failed for block %u in file \"%s\": %s\n"), progname, blockno, fn, strerror(errno));
 				exit(1);
 			}
 
 			/* Write block with checksum */
 			if (write(f, buf.data, BLCKSZ) != BLCKSZ)
 			{
-				fprintf(stderr, "%s: could not update checksum of block %d in file \"%s\": %s\n",
+				fprintf(stderr, "%s: could not update checksum of block %u in file \"%s\": %s\n",
 						progname, blockno, fn, strerror(errno));
 				exit(1);
 			}
 
 		}
+
 		/* Report progress or throttle every 1024 blocks */
 		if ((show_progress || maxrate > 0) && (blockno % 1024 == 0))
 			report_progress_or_throttle(false);
@@ -509,6 +516,13 @@ scan_file(const char *fn, BlockNumber segmentno)
 	close(f);
 }
 
+/*
+ * Scan the given directory for items which can be checksummed and
+ * operate on each one of them.  If "sizeonly" is true, the size of
+ * all the items which have checksums is computed and returned back
+ * to the caller without operating on the files.  This is used to compile
+ * the total size of the data directory for progress reports.
+ */
 static int64
 scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 {
@@ -567,7 +581,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 			char		fnonly[MAXPGPATH];
 			char	   *forkpath,
 					   *segmentpath;
-			BlockNumber	segmentno = 0;
+			BlockNumber segmentno = 0;
 
 			if (skipfile(de->d_name))
 				continue;
@@ -602,6 +616,10 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 
 			dirsize += st.st_size;
 
+			/*
+			 * No need to work on the file when calculating only the size of
+			 * the items in the data folder.
+			 */
 			if (!sizeonly)
 				scan_file(fn, segmentno);
 		}
@@ -657,15 +675,15 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "D:abcder:vP", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "abcD:dePr:v", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
 			case 'a':
-				mode = PG_MODE_ENABLE;
+				mode = PG_MODE_ENABLE; /* compat */
 				break;
 			case 'b':
-				mode = PG_MODE_DISABLE;
+				mode = PG_MODE_DISABLE; /* compat */
 				break;
 			case 'c':
 				mode = PG_MODE_CHECK;
@@ -676,9 +694,6 @@ main(int argc, char *argv[])
 			case 'e':
 				mode = PG_MODE_ENABLE;
 				break;
-			case 'D':
-				DataDir = optarg;
-				break;
 			case 'r':
 				if (atoi(optarg) == 0)
 				{
@@ -686,6 +701,12 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				only_relfilenode = pstrdup(optarg);
+				break;
+			case 'v':
+				verbose = true;
+				break;
+			case 'D':
+				DataDir = optarg;
 				break;
 			case 'P':
 				show_progress = true;
@@ -700,9 +721,6 @@ main(int argc, char *argv[])
 				break;
 			case 2:
 				debug = true;
-				verbose = true;
-				break;
-			case 'v':
 				verbose = true;
 				break;
 			default:
@@ -738,8 +756,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Relfilenode checking only works in check mode */
-	if (mode != PG_MODE_CHECK &&
-		only_relfilenode)
+	if (mode != PG_MODE_CHECK && only_relfilenode)
 	{
 		fprintf(stderr, _("%s: relfilenode option only possible with --check\n"), progname);
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
@@ -747,7 +764,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* Check if cluster is running */
+	/* Read the control file and check compatibility */
 #if PG_VERSION_NUM >= 100000
 #if PG_VERSION_NUM >= 120000
 	ControlFile = get_controlfile(DataDir, &crc_ok);
@@ -765,12 +782,20 @@ main(int argc, char *argv[])
 	ControlFile = getControlFile(DataDir);
 #endif
 
-    if (ControlFile->pg_control_version != PG_CONTROL_VERSION)
-    {
+	if (ControlFile->pg_control_version != PG_CONTROL_VERSION)
+	{
 		fprintf(stderr, _("%s: cluster is not compatible with this version of pg_checksums\n"),
-				progname;
+				progname);
 		exit(1);
-    }
+	}
+
+	if (ControlFile->blcksz != BLCKSZ)
+	{
+		fprintf(stderr, _("%s: database cluster is not compatible\n"), progname);
+		fprintf(stderr, _("The database cluster was initialized with block size %u, but pg_checksums was compiled with block size %u.\n"),
+				ControlFile->blcksz, BLCKSZ);
+		exit(1);
+	}
 
 	/*
 	 * Cluster must be shut down for activation/deactivation of checksums, but
@@ -809,7 +834,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	if (ControlFile->data_checksum_version == PG_DATA_CHECKSUM_VERSION &&
+	if (ControlFile->data_checksum_version > 0 &&
 		mode == PG_MODE_ENABLE)
 	{
 		fprintf(stderr, _("%s: data checksums are already enabled in cluster\n"), progname);
@@ -819,17 +844,7 @@ main(int argc, char *argv[])
 	/* Get checkpoint LSN */
 	checkpointLSN = ControlFile->checkPoint;
 
-	/*
-	 * Check that the PGDATA blocksize is the same as the one pg_checksums
-	 * was compiled against (BLCKSZ).
-	 */
-	if (ControlFile->blcksz != BLCKSZ)
-	{
-		fprintf(stderr, _("%s: data directory block size %d is different to compiled-in block size %d.\n"),
-				progname, ControlFile->blcksz, BLCKSZ);
-		exit(1);
-	}
-
+	/* Operate on all files if checking or enabling checksums */
 	if (mode == PG_MODE_CHECK || mode == PG_MODE_ENABLE)
 	{
 #ifndef WIN32
@@ -860,10 +875,9 @@ main(int argc, char *argv[])
 			fprintf(stderr, _("%s: starting scan\n"), progname);
 		INSTR_TIME_SET_CURRENT(scan_started);
 
-		/* Operate on all files */
-		scan_directory(DataDir, "global", false);
-		scan_directory(DataDir, "base", false);
-		scan_directory(DataDir, "pg_tblspc", false);
+		(void) scan_directory(DataDir, "global", false);
+		(void) scan_directory(DataDir, "base", false);
+		(void) scan_directory(DataDir, "pg_tblspc", false);
 
 		/*
 		 * Done. Move to next line in case progress information was shown.
@@ -876,9 +890,6 @@ main(int argc, char *argv[])
 				fprintf(stderr, "\n");
 		}
 
-		/*
-		 * Print summary and we're done.
-		 */
 		printf(_("Checksum operation completed\n"));
 		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
 		if (skippedfiles > 0)
@@ -892,26 +903,32 @@ main(int argc, char *argv[])
 			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
 			if (badblocks > 0)
-				return 1;
+				exit(1);
 
 			/* skipped blocks or files are considered an error if offline */
 			if (!online)
 				if (skippedblocks > 0 || skippedfiles > 0)
-					return 1;
+					exit(1);
 		}
 	}
 
+	/*
+	 * Finally make the data durable on disk if enabling or disabling
+	 * checksums.  Flush first the data directory for safety, and then update
+	 * the control file to keep the switch consistent.
+	 */
 	if (mode == PG_MODE_ENABLE || mode == PG_MODE_DISABLE)
 	{
-		/* Update control file */
 		ControlFile->data_checksum_version =
 			(mode == PG_MODE_ENABLE) ? PG_DATA_CHECKSUM_VERSION : 0;
+
 		updateControlFile(DataDir, ControlFile);
 #if PG_VERSION_NUM >= 120000
 		fsync_pgdata(DataDir, PG_VERSION_NUM);
 #else
 		fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
 #endif
+
 		if (verbose)
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
 		if (mode == PG_MODE_ENABLE)
