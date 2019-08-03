@@ -35,7 +35,7 @@ static double maxrate = 0;
 static ControlFileData *ControlFile;
 static XLogRecPtr checkpointLSN;
 
-static char *only_relfilenode = NULL;
+static char *only_filenode = NULL;
 static bool debug = false;
 static bool verbose = false;
 static bool show_progress = false;
@@ -81,17 +81,18 @@ usage(void)
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
-	printf(_(" [-D, --pgdata=]DATADIR  data directory\n"));
-	printf(_("  -c, --check            check data checksums (default)\n"));
-	printf(_("  -d, --disable          disable data checksums\n"));
-	printf(_("  -e, --enable           enable data checksums\n"));
-	printf(_("  -r RELFILENODE         check only relation with specified relfilenode\n"));
-	printf(_("  -P, --progress         show progress information\n"));
-	printf(_("      --max-rate=RATE    maximum I/O rate to verify or enable checksums (in MB/s)\n"));
-	printf(_("      --debug            debug output\n"));
-	printf(_("  -v, --verbose          output verbose messages\n"));
-	printf(_("  -V, --version          output version information, then exit\n"));
-	printf(_("  -?, --help             show this help, then exit\n"));
+	printf(_(" [-D, --pgdata=]DATADIR    data directory\n"));
+	printf(_("  -c, --check              check data checksums (default)\n"));
+	printf(_("  -d, --disable            disable data checksums\n"));
+	printf(_("  -e, --enable             enable data checksums\n"));
+	printf(_("  -f, --filenode=FILENODE  check only relation with specified relfilenode\n"));
+	printf(_("  -P, --progress           show progress information\n"));
+	printf(_("      --max-rate=RATE      maximum I/O rate to verify or enable checksums\n"));
+	printf(_("                           (in MB/s)\n"));
+	printf(_("      --debug              debug output\n"));
+	printf(_("  -v, --verbose            output verbose messages\n"));
+	printf(_("  -V, --version            output version information, then exit\n"));
+	printf(_("  -?, --help               show this help, then exit\n"));
 	printf(_("\nIf no data directory (DATADIR) is specified, the environment "
 			 "variable PGDATA is used.\n\n"));
 	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
@@ -589,7 +590,7 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 			/*
 			 * Cut off at the segment boundary (".") to get the segment number
 			 * in order to mix it into the checksum. Then also cut off at the
-			 * fork boundary, to get the relfilenode the file belongs to for
+			 * fork boundary, to get the filenode the file belongs to for
 			 * filtering.
 			 */
 			strlcpy(fnonly, de->d_name, sizeof(fnonly));
@@ -610,8 +611,8 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 			if (forkpath != NULL)
 				*forkpath++ = '\0';
 
-			if (only_relfilenode && strcmp(only_relfilenode, fnonly) != 0)
-				/* Relfilenode not to be included */
+			if (only_filenode && strcmp(only_filenode, fnonly) != 0)
+				/* filenode not to be included */
 				continue;
 
 			dirsize += st.st_size;
@@ -642,6 +643,7 @@ main(int argc, char *argv[])
 		{"pgdata", required_argument, NULL, 'D'},
 		{"disable", no_argument, NULL, 'd'},
 		{"enable", no_argument, NULL, 'e'},
+		{"filenode", required_argument, NULL, 'f'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"progress", no_argument, NULL, 'P'},
 		{"max-rate", required_argument, NULL, 1},
@@ -675,7 +677,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "abcD:dePr:v", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "abcD:def:Pv", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -694,13 +696,13 @@ main(int argc, char *argv[])
 			case 'e':
 				mode = PG_MODE_ENABLE;
 				break;
-			case 'r':
+			case 'f':
 				if (atoi(optarg) == 0)
 				{
-					fprintf(stderr, _("%s: invalid relfilenode specification, must be numeric: %s\n"), progname, optarg);
+					fprintf(stderr, _("%s: invalid filenode specification, must be numeric: %s\n"), progname, optarg);
 					exit(1);
 				}
-				only_relfilenode = pstrdup(optarg);
+				only_filenode = pstrdup(optarg);
 				break;
 			case 'v':
 				verbose = true;
@@ -755,10 +757,10 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* Relfilenode checking only works in check mode */
-	if (mode != PG_MODE_CHECK && only_relfilenode)
+	/* filenode checking only works in check mode */
+	if (mode != PG_MODE_CHECK && only_filenode)
 	{
-		fprintf(stderr, _("%s: relfilenode option only possible with --check\n"), progname);
+		fprintf(stderr, _("%s: --filenode option only possible with --check\n"), progname);
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
 				progname);
 		exit(1);

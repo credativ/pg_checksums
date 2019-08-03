@@ -139,7 +139,7 @@ sub check_relation_corruption
 
 	# Checksums are correct for single relfilenode as the table is not
 	# corrupted yet.
-	command_ok(['pg_checksums',  '-c', '-D', $pgdata, '-r',
+	command_ok(['pg_checksums',  '-c', '-D', $pgdata, '-f',
 			   $relfilenode_corrupted],
 		"succeeds for single relfilenode $description with offline cluster");
 
@@ -151,7 +151,7 @@ sub check_relation_corruption
 
 	# Checksum checks on single relfilenode fail
 	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata,
-							  '-r', $relfilenode_corrupted],
+							  '-f', $relfilenode_corrupted],
 							  1,
 							  [qr/Bad checksums:.*1/],
 							  [qr/checksum verification failed/],
@@ -169,7 +169,7 @@ sub check_relation_corruption
 
 	# Checksum checks on single relfilenode fail
 	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata,
-							  '-r', $relfilenode_corrupted],
+							  '-f', $relfilenode_corrupted],
 							  1,
 							  [qr/Bad checksums:.*1/],
 							  [qr/checksum verification failed/],
