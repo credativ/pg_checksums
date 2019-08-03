@@ -1,11 +1,14 @@
-/*
- * pg_checksums
+/*-------------------------------------------------------------------------
  *
- * Verifies/enables/disables data checksums
+ * pg_checksums.c
+ *	  Checks, enables or disables page level checksums for a cluster
  *
- *	Copyright (c) 2010-2019, PostgreSQL Global Development Group
+ * Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *
- *	pg_checksums.c
+ * IDENTIFICATION
+ *	  pg_checksums.c
+ *
+ *-------------------------------------------------------------------------
  */
 
 #define PG_CHECKSUMS_VERSION "0.11devel"
