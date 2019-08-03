@@ -2,7 +2,7 @@
 #
 # Makefile for pg_checksums
 #
-# Copyright (c) 1998-2018, PostgreSQL Global Development Group
+# Copyright (c) 1998-2019, PostgreSQL Global Development Group
 #
 # pg_checksums/Makefile
 #
