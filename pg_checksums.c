@@ -765,6 +765,13 @@ main(int argc, char *argv[])
 	ControlFile = getControlFile(DataDir);
 #endif
 
+    if (ControlFile->pg_control_version != PG_CONTROL_VERSION)
+    {
+		fprintf(stderr, _("%s: cluster is not compatible with this version of pg_checksums\n"),
+				progname;
+		exit(1);
+    }
+
 	/*
 	 * Cluster must be shut down for activation/deactivation of checksums, but
 	 * online verification is supported.
