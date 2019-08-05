@@ -261,6 +261,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 {
 	PGAlignedBlock buf;
 	PageHeader	header = (PageHeader) buf.data;
+	int			i;
 	int			f;
 	BlockNumber blockno;
 	int			flags;
@@ -370,7 +371,7 @@ scan_file(const char *fn, BlockNumber segmentno)
 			/* Check for an all-zeroes page */
 			all_zeroes = true;
 			pagebytes = (size_t *) buf.data;
-			for (int i = 0; i < (BLCKSZ / sizeof(size_t)); i++)
+			for (i = 0; i < (BLCKSZ / sizeof(size_t)); i++)
 			{
 				if (pagebytes[i] != 0)
 				{
