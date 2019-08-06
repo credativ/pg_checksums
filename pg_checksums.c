@@ -897,17 +897,18 @@ main(int argc, char *argv[])
 		}
 
 		printf(_("Checksum operation completed\n"));
-		printf(_("Files scanned:  %" INT64_MODIFIER "d\n"), files);
+		printf(_("Files scanned:  %s\n"), psprintf(INT64_FORMAT, files));
 		if (skippedfiles > 0)
-			printf(_("Files skipped: %" INT64_MODIFIER "d\n"), skippedfiles);
-		printf(_("Blocks scanned: %" INT64_MODIFIER "d\n"), blocks);
+			printf(_("Files skipped:  %s\n"), psprintf(INT64_FORMAT, skippedfiles));
+		printf(_("Blocks scanned: %s\n"), psprintf(INT64_FORMAT, blocks));
 		if (skippedblocks > 0)
-			printf(_("Blocks skipped: %" INT64_MODIFIER "d\n"), skippedblocks);
+			printf(_("Blocks skipped: %s\n"), psprintf(INT64_FORMAT, skippedblocks));;
 
 		if (mode == PG_MODE_CHECK)
 		{
-			printf(_("Bad checksums:  %" INT64_MODIFIER "d\n"), badblocks);
+			printf(_("Bad checksums:  %s\n"), psprintf(INT64_FORMAT, badblocks));
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);
+
 			if (badblocks > 0)
 				exit(1);
 
