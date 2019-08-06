@@ -40,6 +40,7 @@ static ControlFileData *ControlFile;
 static XLogRecPtr checkpointLSN;
 
 static char *only_filenode = NULL;
+static bool do_sync = true;
 static bool debug = false;
 static bool verbose = false;
 static bool show_progress = false;
@@ -90,6 +91,7 @@ usage(void)
 	printf(_("  -d, --disable            disable data checksums\n"));
 	printf(_("  -e, --enable             enable data checksums\n"));
 	printf(_("  -f, --filenode=FILENODE  check only relation with specified relfilenode\n"));
+	printf(_("  -N, --no-sync            do not wait for changes to be written safely to disk\n"));
 	printf(_("  -P, --progress           show progress information\n"));
 	printf(_("      --max-rate=RATE      maximum I/O rate to verify or enable checksums\n"));
 	printf(_("                           (in MB/s)\n"));
@@ -642,9 +644,10 @@ main(int argc, char *argv[])
 		{"disable", no_argument, NULL, 'd'},
 		{"enable", no_argument, NULL, 'e'},
 		{"filenode", required_argument, NULL, 'f'},
-		{"verbose", no_argument, NULL, 'v'},
+		{"no-sync", no_argument, NULL, 'N'},
 		{"progress", no_argument, NULL, 'P'},
 		{"max-rate", required_argument, NULL, 1},
+		{"verbose", no_argument, NULL, 'v'},
 		{"debug", no_argument, NULL, 2},
 		{NULL, 0, NULL, 0}
 	};
@@ -675,7 +678,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "abcD:def:Pv", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "abcD:def:NPv", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -701,6 +704,9 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				only_filenode = pstrdup(optarg);
+				break;
+			case 'N':
+				do_sync = false;
 				break;
 			case 'v':
 				verbose = true;
@@ -922,12 +928,17 @@ main(int argc, char *argv[])
 		ControlFile->data_checksum_version =
 			(mode == PG_MODE_ENABLE) ? PG_DATA_CHECKSUM_VERSION : 0;
 
-		updateControlFile(DataDir, ControlFile);
+		if (do_sync)
+		{
+			printf(_("Syncing data directory\n"));
 #if PG_VERSION_NUM >= 120000
-		fsync_pgdata(DataDir, PG_VERSION_NUM);
+			fsync_pgdata(DataDir, PG_VERSION_NUM);
 #else
-		fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
+			fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
 #endif
+		}
+		printf(_("Updating control file\n"));
+		updateControlFile(DataDir, ControlFile, do_sync);
 
 		if (verbose)
 			printf(_("Data checksum version: %d\n"), ControlFile->data_checksum_version);

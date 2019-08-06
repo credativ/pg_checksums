@@ -32,7 +32,7 @@ is($checksum, 'off', 'checksums are disabled');
 
 $node->stop;
 
-$node->command_ok(['pg_checksums', '-a', '-D', $pgdata],
+$node->command_ok(['pg_checksums', '-a', '-N', '-D', $pgdata],
         'pg_checksums are activated in offline cluster');
 
 $node->start;
@@ -67,7 +67,7 @@ append_to_file "$pgdata/global/99999_vm.123", "";
 
 $node->stop;
 
-$node->command_ok(['pg_checksums', '-b', '-D', $pgdata],
+$node->command_ok(['pg_checksums', '-b', '-N', '-D', $pgdata],
         'pg_checksums are deactivated in offline cluster');
 
 $node->start;
@@ -77,7 +77,7 @@ is($checksum, 'off', 'checksums are disabled');
 
 $node->stop;
 
-$node->command_ok(['pg_checksums', '-a', '-D', $pgdata],
+$node->command_ok(['pg_checksums', '-a', '-N', '-D', $pgdata],
         'pg_checksums are again activated in offline cluster');
 
 $node->start;

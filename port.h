@@ -71,7 +71,7 @@ extern char *DataDir;
 
 static const char *progname;
 
-void updateControlFile(char *DataDir, ControlFileData *ControlFile);
+void updateControlFile(char *DataDir, ControlFileData *ControlFile, bool do_sync);
 
 #if PG_VERSION_NUM < 90600
 extern int      forkname_chars(const char *str, ForkNumber *fork);

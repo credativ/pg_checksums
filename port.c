@@ -55,7 +55,7 @@ getControlFile(char *DataDir)
  * Update the control file.
  */
 void
-updateControlFile(char *DataDir, ControlFileData *ControlFile)
+updateControlFile(char *DataDir, ControlFileData *ControlFile, bool do_sync)
 {
 	int			fd;
 	char		buffer[PG_CONTROL_FILE_SIZE];
@@ -109,10 +109,13 @@ updateControlFile(char *DataDir, ControlFileData *ControlFile)
 		exit(1);
 	}
 
-	if (fsync(fd) != 0)
+	if (do_sync)
 	{
-		fprintf(stderr, _("%s: fsync error: %s\n"), progname, strerror(errno));
-		exit(1);
+		if (fsync(fd) != 0)
+		{
+			fprintf(stderr, _("%s: fsync error: %s\n"), progname, strerror(errno));
+			exit(1);
+		}
 	}
 
 	if (close(fd) < 0)
