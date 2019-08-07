@@ -43,7 +43,7 @@ static char *only_filenode = NULL;
 static bool do_sync = true;
 static bool debug = false;
 static bool verbose = false;
-static bool show_progress = false;
+static bool showprogress = false;
 static bool online = false;
 
 char *DataDir = NULL;
@@ -74,15 +74,14 @@ static const char *progname;
  */
 int64		total_size = 0;
 int64		current_size = 0;
-instr_time	last_progress_update;
+instr_time	last_progress_report;
 instr_time	last_throttle;
 instr_time	scan_started;
 
 static void
 usage(void)
 {
-	printf(_("%s enables, disables or verifies data checksums in a PostgreSQL\n"), progname);
-	printf(_("database cluster.\n\n"));
+	printf(_("%s enables, disables, or verifies data checksums in a PostgreSQL database cluster.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]... [DATADIR]\n"), progname);
 	printf(_("\nOptions:\n"));
@@ -90,7 +89,7 @@ usage(void)
 	printf(_("  -c, --check              check data checksums (default)\n"));
 	printf(_("  -d, --disable            disable data checksums\n"));
 	printf(_("  -e, --enable             enable data checksums\n"));
-	printf(_("  -f, --filenode=FILENODE  check only relation with specified relfilenode\n"));
+	printf(_("  -f, --filenode=FILENODE  check only relation with specified filenode\n"));
 	printf(_("  -N, --no-sync            do not wait for changes to be written safely to disk\n"));
 	printf(_("  -P, --progress           show progress information\n"));
 	printf(_("      --max-rate=RATE      maximum I/O rate to verify or enable checksums\n"));
@@ -99,8 +98,8 @@ usage(void)
 	printf(_("  -v, --verbose            output verbose messages\n"));
 	printf(_("  -V, --version            output version information, then exit\n"));
 	printf(_("  -?, --help               show this help, then exit\n"));
-	printf(_("\nIf no data directory (DATADIR) is specified, the environment "
-			 "variable PGDATA is used.\n\n"));
+	printf(_("\nIf no data directory (DATADIR) is specified, "
+			 "the environment variable PGDATA\nis used.\n\n"));
 	printf(_("Report bugs to https://github.com/credativ/pg_checksums/issues/new.\n"));
 }
 
@@ -150,28 +149,29 @@ static void
 toggle_progress_report(int signum)
 {
 
-	/* we handle SIGUSR1 only, and toggle the value of show_progress */
+	/* we handle SIGUSR1 only, and toggle the value of showprogress */
 	if (signum == SIGUSR1)
-		show_progress = !show_progress;
+		showprogress = !showprogress;
 
 }
 
 /*
  * Report current progress status and/or throttle. Parts borrowed from
- * PostgreSQLs' src/bin/pg_basebackup.c
+ * PostgreSQL's src/bin/pg_basebackup.c.
  */
 static void
-report_progress_or_throttle(bool force)
+progress_report_or_throttle(bool force)
 {
-	instr_time	now;
 	double		elapsed;
 	double		wait;
-	double		total_percent;
+	double		percent;
 	double		current_rate;
 	bool		skip_progress = false;
+	char		total_size_str[32];
+	char		current_size_str[32];
+	instr_time	now;
 
-	char		totalstr[32];
-	char		currentstr[32];
+	Assert(showprogress);
 
 	INSTR_TIME_SET_CURRENT(now);
 
@@ -182,7 +182,7 @@ report_progress_or_throttle(bool force)
 
 	/* Make sure we report at most once every 250 milliseconds */
 	if ((INSTR_TIME_GET_MILLISEC(now) -
-		 INSTR_TIME_GET_MILLISEC(last_progress_update) < 250) && !force)
+		 INSTR_TIME_GET_MILLISEC(last_progress_report) < 250) && !force)
 		skip_progress = true;
 
 	/* Save current time */
@@ -196,8 +196,8 @@ report_progress_or_throttle(bool force)
 	if (current_size > total_size)
 		total_size = current_size;
 
-	/* Calculate current percent done */
-	total_percent = total_size ? 100.0 * current_size / total_size : 0.0;
+	/* Calculate current percentage of size done */
+	percent = total_size ? 100.0 * current_size / total_size : 0.0;
 
 #define MEGABYTES (1024 * 1024)
 
@@ -207,9 +207,9 @@ report_progress_or_throttle(bool force)
 	 */
 	current_rate = (current_size / MEGABYTES) / (elapsed / 1000);
 
-	snprintf(totalstr, sizeof(totalstr), INT64_FORMAT,
+	snprintf(total_size_str, sizeof(total_size_str), INT64_FORMAT,
 			 total_size / MEGABYTES);
-	snprintf(currentstr, sizeof(currentstr), INT64_FORMAT,
+	snprintf(current_size_str, sizeof(current_size_str), INT64_FORMAT,
 			 current_size / MEGABYTES);
 
 	/* Throttle if desired */
@@ -231,18 +231,18 @@ report_progress_or_throttle(bool force)
 	}
 
 	/* Report progress if desired */
-	if (show_progress && !skip_progress)
+	if (showprogress && !skip_progress)
 	{
 		/*
 		 * Print five blanks at the end so the end of previous lines which were
 		 * longer don't remain partly visible.
 		 */
 		fprintf(stderr, "%s/%s MB (%d%%, %.0f MB/s)%5s",
-				currentstr, totalstr, (int)total_percent, current_rate, "");
+				current_size_str, total_size_str, (int)percent, current_rate, "");
 
 		/* Stay on the same line if reporting to a terminal */
 		fprintf(stderr, isatty(fileno(stderr)) ? "\r" : "\n");
-		last_progress_update = now;
+		last_progress_report = now;
 	}
 }
 
@@ -502,8 +502,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 		}
 
 		/* Report progress or throttle every 1024 blocks */
-		if ((show_progress || maxrate > 0) && (blockno % 1024 == 0))
-			report_progress_or_throttle(false);
+		if ((showprogress || maxrate > 0) && (blockno % 1024 == 0))
+			progress_report_or_throttle(false);
 	}
 
 	if (verbose)
@@ -515,8 +515,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 	}
 
 	/* Make sure progress is reported at least once per file */
-	if (show_progress || maxrate > 0)
-		report_progress_or_throttle(false);
+	if (showprogress || maxrate > 0)
+		progress_report_or_throttle(false);
 
 	close(f);
 }
@@ -715,7 +715,7 @@ main(int argc, char *argv[])
 				DataDir = optarg;
 				break;
 			case 'P':
-				show_progress = true;
+				showprogress = true;
 				break;
 			case 1:
 				if (atof(optarg) == 0)
@@ -761,7 +761,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* filenode checking only works in check mode */
+	/* filenode checking only works in --check mode */
 	if (mode != PG_MODE_CHECK && only_filenode)
 	{
 		fprintf(stderr, _("%s: --filenode option only possible with --check\n"), progname);
@@ -875,7 +875,7 @@ main(int argc, char *argv[])
 
 		/*
 		 * Remember start time. Required to calculate the current rate in
-		 * report_progress_or_throttle().
+		 * progress_report_or_throttle().
 		 */
 		if (debug)
 			fprintf(stderr, _("%s: starting scan\n"), progname);
@@ -889,9 +889,9 @@ main(int argc, char *argv[])
 		 * Done. Move to next line in case progress information was shown.
 		 * Otherwise we clutter the summary output.
 		 */
-		if (show_progress)
+		if (showprogress)
 		{
-			report_progress_or_throttle(true);
+			progress_report_or_throttle(true);
 			if (isatty(fileno(stderr)))
 				fprintf(stderr, "\n");
 		}
