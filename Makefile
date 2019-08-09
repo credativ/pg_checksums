@@ -12,9 +12,8 @@ PROGRAM = pg_checksums
 PGFILEDESC = "pg_checksums - Activate/deactivate/verify data checksums in an offline cluster"
 PGAPPICON=win32
 
-
 OBJS= pg_checksums.o port.o $(WIN32RES)
-EXTRA_CLEAN = tmp_check
+EXTRA_CLEAN = tmp_check doc/man1
 
 PG_CONFIG ?= pg_config
 PGXS = $(shell $(PG_CONFIG) --pgxs)
@@ -24,6 +23,11 @@ include $(PGXS)
 LIBS = $(libpq_pgport)
 
 all: pg_checksums
+
+man: doc/man1/pg_checksums.1
+
+doc/man1/pg_checksums.1: doc/pg_checksums.sgml
+	(cd doc && xsltproc stylesheet-man.xsl pg_checksums.sgml)
 
 prove_installcheck:
 	rm -rf $(CURDIR)/tmp_check
