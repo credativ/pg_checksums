@@ -38,8 +38,8 @@ PostgreSQL documentation
   <para>
    <application>pg_checksums</application> checks, enables or disables data
    checksums in a <productname>PostgreSQL</productname> cluster.  The server
-   must be shut down cleanly before running
-   <application>pg_checksums</application>. When verifying checksums, the exit
+   must be shut down when enabling or disabling checksums, while verifying
+   checksums can be done online. When verifying checksums, the exit
    status is zero if there are no checksum errors, and nonzero if at least one
    checksum failure is detected. When enabling or disabling checksums, the
    exit status is nonzero if the operation failed.
@@ -133,7 +133,17 @@ PostgreSQL documentation
       <listitem>
        <para>
         Enable progress reporting. Turning this on will deliver a progress
-        report while checking or enabling checksums.
+	report while checking or enabling checksums.  Progress reporting can
+        also be triggered by the <signal>SIGUSR1</signal> signal.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--max-rate=<replaceable>rate</replaceable></option></term>
+      <listitem>
+       <para>
+        Set a maximum I/O rate (in MB/s) while checking or enabling checksums.
        </para>
       </listitem>
      </varlistentry>
@@ -144,6 +154,15 @@ PostgreSQL documentation
       <listitem>
        <para>
         Enable verbose output. Lists all checked files.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--debug</option></term>
+      <listitem>
+       <para>
+        Enable debug output.
        </para>
       </listitem>
      </varlistentry>
