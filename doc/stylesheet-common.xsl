@@ -11,22 +11,7 @@
 
 <!-- Parameters -->
 
-<!--
-<xsl:param name="draft.mode">
-  <xsl:choose>
-    <xsl:when test="contains($pg.version, 'devel')">yes</xsl:when>
-    <xsl:otherwise>no</xsl:otherwise>
-  </xsl:choose>
-</xsl:param>
--->
-
-<xsl:param name="show.comments">
-  <xsl:choose>
-    <xsl:when test="contains($pg.version, 'devel')">1</xsl:when>
-    <xsl:otherwise>0</xsl:otherwise>
-  </xsl:choose>
-</xsl:param>
-
+<xsl:param name="show.comments">no</xsl:param>
 <xsl:param name="callout.graphics" select="'0'"></xsl:param>
 <xsl:param name="toc.section.depth">2</xsl:param>
 <xsl:param name="linenumbering.extension" select="'0'"></xsl:param>
