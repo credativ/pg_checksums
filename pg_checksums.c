@@ -300,63 +300,66 @@ scan_file(const char *fn, BlockNumber segmentno)
 
 		if (r == 0)
 			break;
-		if (r < 0)
-		{
-			skippedfiles++;
-			pg_log_error("could not read block %u in file \"%s\": %m", blockno, fn);
-			return;
-		}
 		if (r != BLCKSZ)
 		{
-			if (online)
+			if (r < 0)
 			{
-				if (block_retry)
-				{
-					/* We already tried once to reread the block, skip to the next block */
-					skippedblocks++;
-					if (debug)
-						pg_log_debug("retrying block %u in file \"%s\" failed, skipping to next block",
-									 blockno, fn);
-
-					if (lseek(f, BLCKSZ-r, SEEK_CUR) == -1)
-					{
-						pg_log_error("could not lseek to next block in file \"%s\": %m", fn);
-						return;
-					}
-					continue;
-				}
-
-				/*
-				 * Retry the block. It's possible that we read the block while it
-				 * was extended or shrinked, so it it ends up looking torn to us.
-				 */
-
-				/*
-				 * Seek back by the amount of bytes we read to the beginning of
-				 * the failed block.
-				 */
-				if (lseek(f, -r, SEEK_CUR) == -1)
-				{
-					skippedfiles++;
-					pg_log_error("could not lseek to in file \"%s\": %m", fn);
-					return;
-				}
-
-				/* Set flag so we know a retry was attempted */
-				block_retry = true;
-
-				/* Reset loop to validate the block again */
-				blockno--;
-
-				continue;
+				skippedfiles++;
+				pg_log_error("could not read block %u in file \"%s\": %m", blockno, fn);
+				return;
 			}
 			else
 			{
-				/* Directly skip file if offline */
-				skippedfiles++;
-				pg_log_error("could not read block %u in file \"%s\": read %d of %d",
-							 blockno, fn, r, BLCKSZ);
-				return;
+				if (online)
+				{
+					if (block_retry)
+					{
+						/* We already tried once to reread the block, skip to the next block */
+						skippedblocks++;
+						if (debug)
+							pg_log_debug("retrying block %u in file \"%s\" failed, skipping to next block",
+										 blockno, fn);
+
+						if (lseek(f, BLCKSZ-r, SEEK_CUR) == -1)
+						{
+							pg_log_error("could not lseek to next block in file \"%s\": %m", fn);
+							return;
+						}
+						continue;
+					}
+
+					/*
+					 * Retry the block. It's possible that we read the block while it
+					 * was extended or shrinked, so it it ends up looking torn to us.
+					 */
+
+					/*
+					 * Seek back by the amount of bytes we read to the beginning of
+					 * the failed block.
+					 */
+					if (lseek(f, -r, SEEK_CUR) == -1)
+					{
+						skippedfiles++;
+						pg_log_error("could not lseek to in file \"%s\": %m", fn);
+						return;
+					}
+
+					/* Set flag so we know a retry was attempted */
+					block_retry = true;
+
+					/* Reset loop to validate the block again */
+					blockno--;
+
+					continue;
+				}
+				else
+				{
+					/* Directly skip file if offline */
+					skippedfiles++;
+					pg_log_error("could not read block %u in file \"%s\": read %d of %d",
+								 blockno, fn, r, BLCKSZ);
+					return;
+				}
 			}
 		}
 		blocks++;
@@ -473,6 +476,8 @@ scan_file(const char *fn, BlockNumber segmentno)
 		}
 		else if (mode == PG_MODE_ENABLE)
 		{
+			int 	w;
+
 			/* Set checksum in page header */
 			header->pd_checksum = csum;
 
@@ -484,10 +489,15 @@ scan_file(const char *fn, BlockNumber segmentno)
 			}
 
 			/* Write block with checksum */
-			if (write(f, buf.data, BLCKSZ) != BLCKSZ)
+			w = write(f, buf.data, BLCKSZ);
+			if (w != BLCKSZ)
 			{
-				pg_log_error("could not write block %u in file \"%s\": %m",
-							 blockno, fn);
+				if (w < 0)
+					pg_log_error("could not write block %u in file \"%s\": %m",
+								 blockno, fn);
+				else
+					pg_log_error("could not write block %u in file \"%s\": wrote %d of %d",
+								 blockno, fn, w, BLCKSZ);
 				exit(1);
 			}
 		}
