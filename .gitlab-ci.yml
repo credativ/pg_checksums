@@ -1,0 +1,17 @@
+image: "debian:latest"
+
+build:
+  stage: build
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends
+        build-essential
+        postgresql-server-dev-all
+        postgresql
+        libipc-run-perl
+        xsltproc
+    - useradd ci-runner
+  script:
+    - make
+    - make install
+    - su ci-runner -c 'make installcheck' || (cat tmp_check/log/*; exit 1)
