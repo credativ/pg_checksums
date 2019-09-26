@@ -364,6 +364,7 @@ void
 pg_logging_init(const char *argv0)
 {
 	const char *pg_color_env = getenv("PG_COLOR");
+	char	   *token;
 	bool		log_color = false;
 
 	/* usually the default, but not on Windows */
@@ -389,7 +390,7 @@ pg_logging_init(const char *argv0)
 
 			if (colors)
 			{
-				for (char *token = strtok(colors, ":"); token; token = strtok(NULL, ":"))
+				for (token = strtok(colors, ":"); token; token = strtok(NULL, ":"))
 				{
 					char	   *e = strchr(token, '=');
 
