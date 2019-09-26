@@ -22,6 +22,8 @@ include $(PGXS)
 # avoid linking against all libs that the server links against (xml, selinux, ...)
 LIBS = $(libpq_pgport)
 
+PROVE_FLAGS += -I./t/perl
+
 all: pg_checksums
 
 man: doc/man1/pg_checksums.1
@@ -31,6 +33,6 @@ doc/man1/pg_checksums.1: doc/pg_checksums.sgml
 
 prove_installcheck:
 	rm -rf $(CURDIR)/tmp_check
-	cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' PG_REGRESS='$(top_builddir)/src/test/regress/pg_regress' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) $(if $(PROVE_TESTS),$(PROVE_TESTS),t/*.pl)
+	cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' PG_REGRESS='$(top_builddir)/src/test/regress/pg_regress' $(PROVE) $(PROVE_FLAGS) $(if $(PROVE_TESTS),$(PROVE_TESTS),t/*.pl)
 
 installcheck: prove_installcheck
