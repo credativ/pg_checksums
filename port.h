@@ -148,3 +148,5 @@ void		pg_log_generic_v(enum pg_log_level level, const char *pg_restrict fmt, va_
 		if (unlikely(__pg_log_level <= PG_LOG_DEBUG)) pg_log_generic(PG_LOG_DEBUG, __VA_ARGS__); \
 	} while(0)
 #endif
+
+void CheckDataVersion(char *DataDir);

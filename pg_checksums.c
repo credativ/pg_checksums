@@ -766,6 +766,9 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/* Check major version compatibility */
+	CheckDataVersion(DataDir);
+
 	/* Read the control file and check compatibility */
 #if PG_VERSION_NUM >= 100000
 #if PG_VERSION_NUM >= 120000
