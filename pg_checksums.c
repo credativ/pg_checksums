@@ -722,6 +722,7 @@ main(int argc, char *argv[])
 				maxrate = atof(optarg);
 				break;
 			case 2:
+				__pg_log_level = PG_LOG_DEBUG;
 				debug = true;
 				verbose = true;
 				break;
