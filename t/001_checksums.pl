@@ -124,7 +124,7 @@ sub check_relation_corruption
 	my $pgdata = $node->data_dir;
 
 	$node->safe_psql('postgres',
-		"SELECT a INTO $table FROM generate_series(1,10000) AS a;
+		"CREATE TABLE $table AS SELECT a FROM generate_series(1,10000) AS a;
 		ALTER TABLE $table SET (autovacuum_enabled=false);");
 
 	$node->safe_psql('postgres',
