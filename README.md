@@ -2,7 +2,7 @@ pg_checksums - Activate/deactivate/verify checksums in PostgreSQL clusters
 ==========================================================================
 
 `pg_checksums` is based on the `pg_verify_checksums` and `pg_checksums`
-programs available in PostgreSQL version 11 and from 12, respectively. It cat
+programs available in PostgreSQL version 11 and from 12, respectively. It can
 verify, activate or deactivate checksums. Activating requires all database
 blocks to be read and all page headers to be updated, so can take a long time
 on a large database.
