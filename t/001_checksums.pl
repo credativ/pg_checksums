@@ -8,9 +8,9 @@ use PostgresNode;
 use TestLib;
 use Test::More tests => 121;
 
-program_help_ok('pg_checksums');
-program_version_ok('pg_checksums');
-program_options_handling_ok('pg_checksums');
+program_help_ok('pg_checksums_ext');
+program_version_ok('pg_checksums_ext');
+program_options_handling_ok('pg_checksums_ext');
 
 my $tempdir = TestLib::tempdir;
 
@@ -21,19 +21,19 @@ $node->init;
 $node->start;
 my $pgdata = $node->data_dir;
 
-$node->command_fails(['pg_checksums', '-c'],
-        'pg_checksums needs needs target directory specified');
+$node->command_fails(['pg_checksums_ext', '-c'],
+        'pg_checksums_ext needs needs target directory specified');
 
-$node->command_fails(['pg_checksums', '-a', '-D', $pgdata],
-        'pg_checksums -a needs to run against offfline cluster');
+$node->command_fails(['pg_checksums_ext', '-a', '-D', $pgdata],
+        'pg_checksums_ext -a needs to run against offfline cluster');
 
 my $checksum = $node->safe_psql('postgres', 'SHOW data_checksums;');
 is($checksum, 'off', 'checksums are disabled');
 
 $node->stop;
 
-$node->command_ok(['pg_checksums', '-a', '-N', '-D', $pgdata],
-        'pg_checksums are activated in offline cluster');
+$node->command_ok(['pg_checksums_ext', '-a', '-N', '-D', $pgdata],
+        'pg_checksums_ext are activated in offline cluster');
 
 $node->start;
 
@@ -67,8 +67,8 @@ append_to_file "$pgdata/global/99999_vm.123", "";
 
 $node->stop;
 
-$node->command_ok(['pg_checksums', '-b', '-N', '-D', $pgdata],
-        'pg_checksums are deactivated in offline cluster');
+$node->command_ok(['pg_checksums_ext', '-b', '-N', '-D', $pgdata],
+        'pg_checksums_ext are deactivated in offline cluster');
 
 $node->start;
 
@@ -77,13 +77,13 @@ is($checksum, 'off', 'checksums are disabled');
 
 $node->stop;
 
-$node->command_ok(['pg_checksums', '-a', '-N', '-D', $pgdata],
-        'pg_checksums are again activated in offline cluster');
+$node->command_ok(['pg_checksums_ext', '-a', '-N', '-D', $pgdata],
+        'pg_checksums_ext are again activated in offline cluster');
 
 $node->start;
 
-$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
-        'pg_checksums can be verified in online cluster');
+$node->command_ok(['pg_checksums_ext', '-c', '-D', $pgdata],
+        'pg_checksums_ext can be verified in online cluster');
 
 # Set page header and block size
 my $pageheader_size = 24;
@@ -139,7 +139,7 @@ sub check_relation_corruption
 
 	# Checksums are correct for single relfilenode as the table is not
 	# corrupted yet.
-	command_ok(['pg_checksums',  '-c', '-D', $pgdata, '-f',
+	command_ok(['pg_checksums_ext',  '-c', '-D', $pgdata, '-f',
 			   $relfilenode_corrupted],
 		"succeeds for single relfilenode $description with offline cluster");
 
@@ -150,7 +150,7 @@ sub check_relation_corruption
 	close $file;
 
 	# Checksum checks on single relfilenode fail
-	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata,
+	$node->command_checks_all([ 'pg_checksums_ext', '-c', '-D', $pgdata,
 							  '-f', $relfilenode_corrupted],
 							  1,
 							  [qr/Bad checksums:.*1/],
@@ -158,7 +158,7 @@ sub check_relation_corruption
 							  "fails with corrupted data $description");
 
 	# Global checksum checks fail as well
-	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+	$node->command_checks_all([ 'pg_checksums_ext', '-c', '-D', $pgdata],
 							  1,
 							  [qr/Bad checksums:.*1/],
 							  [qr/checksum verification failed/],
@@ -168,7 +168,7 @@ sub check_relation_corruption
 	$node->start;
 
 	# Checksum checks on single relfilenode fail
-	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata,
+	$node->command_checks_all([ 'pg_checksums_ext', '-c', '-D', $pgdata,
 							  '-f', $relfilenode_corrupted],
 							  1,
 							  [qr/Bad checksums:.*1/],
@@ -176,7 +176,7 @@ sub check_relation_corruption
 							  "fails with corrupted data $description");
 
 	# Global checksum checks fail as well
-	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+	$node->command_checks_all([ 'pg_checksums_ext', '-c', '-D', $pgdata],
 							  1,
 							  [qr/Bad checksums:.*1/],
 							  [qr/checksum verification failed/],
@@ -184,12 +184,12 @@ sub check_relation_corruption
 
 	# Drop corrupted table again and make sure there is no more corruption.
 	$node->safe_psql('postgres', "DROP TABLE $table;");
-	$node->command_ok(['pg_checksums', '-c', '-D', $pgdata],
+	$node->command_ok(['pg_checksums_ext', '-c', '-D', $pgdata],
 		"succeeds again after table drop on tablespace $tablespace");
 	return;
 }
 
-# Utility routine to check that pg_checksums is able to detect
+# Utility routine to check that pg_checksums_ext is able to detect
 # correctly-named relation files filled with some corrupted data.
 sub fail_corrupt
 {
@@ -204,7 +204,7 @@ sub fail_corrupt
 	$node->stop;
 	# If the instance is offline, the whole file is skipped and this is
 	# considered to be an error.
-	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+	$node->command_checks_all([ 'pg_checksums_ext', '-c', '-D', $pgdata],
 						1,
 						[qr/Files skipped:.*1/],
 						[qr/could not read block 0 in file.*$file\":/],
@@ -213,7 +213,7 @@ sub fail_corrupt
 	$node->start;
 	# If the instance is online, the block is skipped and this is not
 	# considered to be an error
-	$node->command_checks_all([ 'pg_checksums', '-c', '-D', $pgdata],
+	$node->command_checks_all([ 'pg_checksums_ext', '-c', '-D', $pgdata],
 						0,
 						[qr/Blocks skipped:.*1/],
 						[qr/^$/],

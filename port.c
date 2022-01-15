@@ -1,5 +1,5 @@
 /*
- * pg_checksums
+ * pg_checksums_ext
  *
  * Verifies/enables/disables data checksums
  *
