@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
- * pg_checksums.c
+ * pg_checksums_ext.c
  *	  Checks, enables or disables page level checksums for a cluster
  *
  * Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *	  pg_checksums.c
+ *	  pg_checksums_ext.c
  *
  *-------------------------------------------------------------------------
  */
@@ -751,7 +751,7 @@ main(int argc, char *argv[])
 #endif
 
 	pg_logging_init(argv[0]);
-	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums"));
+	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums_ext"));
 	progname = get_progname(argv[0]);
 
 	if (argc > 1)
@@ -763,7 +763,7 @@ main(int argc, char *argv[])
 		}
 		if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
 		{
-			puts("pg_checksums " PG_CHECKSUMS_VERSION " (PostgreSQL " PG_MAJORVERSION ")");
+			puts("pg_checksums_ext " PG_CHECKSUMS_VERSION " (PostgreSQL " PG_MAJORVERSION ")");
 			exit(0);
 		}
 	}
@@ -884,14 +884,14 @@ main(int argc, char *argv[])
 
 	if (ControlFile->pg_control_version != PG_CONTROL_VERSION)
 	{
-		pg_log_error("cluster is not compatible with this version of pg_checksums");
+		pg_log_error("cluster is not compatible with this version of pg_checksums_ext");
 		exit(1);
 	}
 
 	if (ControlFile->blcksz != BLCKSZ)
 	{
 		pg_log_error("database cluster is not compatible");
-		fprintf(stderr, _("The database cluster was initialized with block size %u, but pg_checksums was compiled with block size %u.\n"),
+		fprintf(stderr, _("The database cluster was initialized with block size %u, but pg_checksums_ext was compiled with block size %u.\n"),
 				ControlFile->blcksz, BLCKSZ);
 		exit(1);
 	}

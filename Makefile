@@ -1,18 +1,18 @@
 #-------------------------------------------------------------------------
 #
-# Makefile for pg_checksums
+# Makefile for pg_checksums_ext
 #
 # Copyright (c) 1998-2019, PostgreSQL Global Development Group
 #
-# pg_checksums/Makefile
+# pg_checksums_ext/Makefile
 #
 #-------------------------------------------------------------------------
 
-PROGRAM = pg_checksums
-PGFILEDESC = "pg_checksums - Activate/deactivate/verify data checksums in an offline cluster"
+PROGRAM = pg_checksums_ext
+PGFILEDESC = "pg_checksums_ext - Checks, enables or disables page level checksums for a cluster"
 PGAPPICON=win32
 
-OBJS= pg_checksums.o port.o $(WIN32RES)
+OBJS= pg_checksums_ext.o port.o $(WIN32RES)
 EXTRA_CLEAN = tmp_check doc/man1
 
 PG_CONFIG ?= pg_config
@@ -24,11 +24,11 @@ LIBS = $(libpq_pgport)
 
 PROVE_FLAGS += -I./t/perl
 
-all: pg_checksums
+all: pg_checksums_ext
 
-man: doc/man1/pg_checksums.1
+man: doc/man1/pg_checksums_ext.1
 
-doc/man1/pg_checksums.1: doc/pg_checksums.sgml
+doc/man1/pg_checksums_ext.1: doc/pg_checksums.sgml
 	(cd doc && xsltproc stylesheet-man.xsl pg_checksums.sgml)
 
 prove_installcheck:

@@ -9,19 +9,19 @@ PostgreSQL documentation
  </indexterm>
 
  <refmeta>
-  <refentrytitle><application>pg_checksums</application></refentrytitle>
+  <refentrytitle><application>pg_checksums_ext</application></refentrytitle>
   <manvolnum>1</manvolnum>
   <refmiscinfo>Application</refmiscinfo>
  </refmeta>
 
  <refnamediv>
-  <refname>pg_checksums</refname>
+  <refname>pg_checksums_ext</refname>
   <refpurpose>enable, disable or check data checksums in a <productname>PostgreSQL</productname> database cluster</refpurpose>
  </refnamediv>
 
  <refsynopsisdiv>
   <cmdsynopsis>
-   <command>pg_checksums</command>
+   <command>pg_checksums_ext</command>
    <arg rep="repeat" choice="opt"><replaceable class="parameter">option</replaceable></arg>
    <group choice="opt">
     <group choice="opt">
@@ -33,10 +33,10 @@ PostgreSQL documentation
   </cmdsynopsis>
  </refsynopsisdiv>
 
- <refsect1 id="r1-app-pg_checksums-1">
+ <refsect1 id="r1-app-pg_checksums_ext-1">
   <title>Description</title>
   <para>
-   <application>pg_checksums</application> checks, enables or disables data
+   <application>pg_checksums_ext</application> checks, enables or disables data
    checksums in a <productname>PostgreSQL</productname> cluster.  The server
    must be shut down when enabling or disabling checksums, while verifying
    checksums can be done online. When verifying checksums, the exit
@@ -117,9 +117,9 @@ PostgreSQL documentation
       <term><option>--no-sync</option></term>
       <listitem>
        <para>
-        By default, <command>pg_checksums</command> will wait for all files
+        By default, <command>pg_checksums_ext</command> will wait for all files
         to be written safely to disk.  This option causes
-        <command>pg_checksums</command> to return without waiting, which is
+        <command>pg_checksums_ext</command> to return without waiting, which is
         faster, but means that a subsequent operating system crash can leave
         the updated data directory corrupt.  Generally, this option is useful
         for testing but should not be used on a production installation.
@@ -173,7 +173,7 @@ PostgreSQL documentation
        <term><option>--version</option></term>
        <listitem>
        <para>
-        Print the <application>pg_checksums</application> version and exit.
+        Print the <application>pg_checksums_ext</application> version and exit.
        </para>
        </listitem>
      </varlistentry>
@@ -183,7 +183,7 @@ PostgreSQL documentation
       <term><option>--help</option></term>
        <listitem>
         <para>
-         Show help about <application>pg_checksums</application> command line
+         Show help about <application>pg_checksums_ext</application> command line
          arguments, and exit.
         </para>
        </listitem>
@@ -239,9 +239,9 @@ PostgreSQL documentation
    safe.
   </para>
   <para>
-   If <application>pg_checksums</application> is aborted or killed while
+   If <application>pg_checksums_ext</application> is aborted or killed while
    enabling or disabling checksums, the cluster's data checksum configuration
-   remains unchanged, and <application>pg_checksums</application> can be
+   remains unchanged, and <application>pg_checksums_ext</application> can be
    re-run to perform the same operation.
   </para>
  </refsect1>
