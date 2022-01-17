@@ -3,7 +3,7 @@
  *
  * Verifies/enables/disables data checksums
  *
- *	Copyright (c) 2010-2019, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
  *
  *	port.h
  */
