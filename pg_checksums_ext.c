@@ -420,9 +420,8 @@ scan_file(const char *fn, int segmentno)
 			}
 			else
 			{
-				if (debug && block_retry)
+				if (debug)
 					pg_log_debug("block %u in file \"%s\" is new, ignoring", blockno, fn);
-				skippedblocks++;
 			}
 			continue;
 		}
