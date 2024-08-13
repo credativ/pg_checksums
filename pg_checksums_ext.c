@@ -399,7 +399,7 @@ scan_file(const char *fn, int segmentno)
 		current_size += r;
 
 		/* New pages have no checksum yet */
-		if (PageIsNew(header))
+		if (PageIsNew(buf.data))
 		{
 			/* Check for an all-zeroes page */
 			all_zeroes = true;
