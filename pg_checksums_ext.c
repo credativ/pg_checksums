@@ -49,6 +49,9 @@ static bool do_sync = true;
 static bool debug = false;
 static bool verbose = false;
 static bool showprogress = false;
+#if PG_VERSION_NUM >= 170000
+static DataDirSyncMethod sync_method = DATA_DIR_SYNC_METHOD_FSYNC;
+#endif
 static bool online = false;
 
 char *DataDir = NULL;
@@ -1029,7 +1032,9 @@ main(int argc, char *argv[])
 		if (do_sync)
 		{
 			pg_log_info("syncing data directory");
-#if PG_VERSION_NUM >= 120000
+#if PG_VERSION_NUM >= 170000
+			sync_pgdata(DataDir, PG_VERSION_NUM, sync_method);
+#elif PG_VERSION_NUM >= 120000
 			fsync_pgdata(DataDir, PG_VERSION_NUM);
 #else
 			fsync_pgdata(DataDir, progname, PG_VERSION_NUM);
