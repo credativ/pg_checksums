@@ -3,7 +3,7 @@
  * pg_checksums_ext.c
  *	  Checks, enables or disables page level checksums for a cluster
  *
- * Copyright (c) 2010-2022, PostgreSQL Global Development Group
+ * Copyright (c) 2010-2024, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  pg_checksums_ext.c
@@ -18,6 +18,7 @@
 #include "port.h"
 
 #include <dirent.h>
+#include <limits.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -49,10 +50,10 @@ static bool do_sync = true;
 static bool debug = false;
 static bool verbose = false;
 static bool showprogress = false;
+static bool online = false;
 #if PG_VERSION_NUM >= 170000
 static DataDirSyncMethod sync_method = DATA_DIR_SYNC_METHOD_FSYNC;
 #endif
-static bool online = false;
 
 char *DataDir = NULL;
 
@@ -60,18 +61,8 @@ typedef enum
 {
 	PG_MODE_CHECK,
 	PG_MODE_DISABLE,
-	PG_MODE_ENABLE
+	PG_MODE_ENABLE,
 } PgChecksumMode;
-
-/*
- * Filename components.
- *
- * XXX: fd.h is not declared here as frontend side code is not able to
- * interact with the backend-side definitions for the various fsync
- * wrappers.
- */
-#define PG_TEMP_FILES_DIR "pgsql_tmp"
-#define PG_TEMP_FILE_PREFIX "pgsql_tmp"
 
 static PgChecksumMode mode = PG_MODE_CHECK;
 
@@ -100,6 +91,9 @@ usage(void)
 	printf(_("  -f, --filenode=FILENODE  check only relation with specified filenode\n"));
 	printf(_("  -N, --no-sync            do not wait for changes to be written safely to disk\n"));
 	printf(_("  -P, --progress           show progress information\n"));
+#if PG_VERSION_NUM >= 170000
+	printf(_("      --sync-method=METHOD set method for syncing files to disk\n"));
+#endif
 	printf(_("      --max-rate=RATE      maximum I/O rate to verify or enable checksums\n"));
 	printf(_("                           (in MB/s)\n"));
 	printf(_("      --debug              debug output\n"));
@@ -183,11 +177,9 @@ progress_report_or_throttle(bool finished)
 {
 	double		elapsed;
 	double		wait;
-	double		percent;
+	int			percent;
 	double		current_rate;
 	bool		skip_progress = false;
-	char		total_size_str[32];
-	char		current_size_str[32];
 	instr_time	now;
 
 	Assert(showprogress);
@@ -205,6 +197,7 @@ progress_report_or_throttle(bool finished)
 		skip_progress = true;
 
 	/* Save current time */
+	last_progress_report = now;
 	last_throttle = now;
 
 	/* Elapsed time in milliseconds since start of scan */
@@ -216,7 +209,7 @@ progress_report_or_throttle(bool finished)
 		total_size = current_size;
 
 	/* Calculate current percentage of size done */
-	percent = total_size ? 100.0 * current_size / total_size : 0.0;
+	percent = total_size ? (int) ((current_size) * 100 / total_size) : 0;
 
 #define MEGABYTES (1024 * 1024)
 
@@ -225,11 +218,6 @@ progress_report_or_throttle(bool finished)
 	 * and elapsed from milliseconds to seconds.
 	 */
 	current_rate = (current_size / MEGABYTES) / (elapsed / 1000);
-
-	snprintf(total_size_str, sizeof(total_size_str), INT64_FORMAT,
-			 total_size / MEGABYTES);
-	snprintf(current_size_str, sizeof(current_size_str), INT64_FORMAT,
-			 current_size / MEGABYTES);
 
 	/* Throttle if desired */
 	if (maxrate > 0 && current_rate > maxrate)
@@ -255,15 +243,16 @@ progress_report_or_throttle(bool finished)
 		 * Print five blanks at the end so the end of previous lines which were
 		 * longer don't remain partly visible.
 		 */
-		fprintf(stderr, "%s/%s MB (%d%%, %.0f MB/s)%5s",
-				current_size_str, total_size_str, (int)percent, current_rate, "");
+		fprintf(stderr, _("%lld/%lld MB (%d%%, %.0f MB/s)%5s"),
+				(long long) (current_size / MEGABYTES),
+				(long long) (total_size / MEGABYTES),
+				percent, current_rate, "");
 
 		/*
 		 * Stay on the same line if reporting to a terminal and we're not done
 		 * yet.
 		 */
 		fputc((!finished && isatty(fileno(stderr))) ? '\r' : '\n', stderr);
-		last_progress_report = now;
 	}
 }
 
@@ -288,7 +277,11 @@ skipfile(const char *fn)
 static void
 scan_file(const char *fn, int segmentno)
 {
+#if PG_VERSION_NUM >= 160000
+	PGIOAlignedBlock buf;
+#else
 	PGAlignedBlock buf;
+#endif
 	PageHeader	header = (PageHeader) buf.data;
 	int			i;
 	int			f;
@@ -616,6 +609,10 @@ scan_directory(const char *basedir, const char *subdir, bool sizeonly)
 					strlen(PG_TEMP_FILES_DIR)) == 0)
 			continue;
 
+		/* Skip macOS system files */
+		if (strcmp(de->d_name, ".DS_Store") == 0)
+			continue;
+
 		snprintf(fn, sizeof(fn), "%s/%s", path, de->d_name);
 		if (lstat(fn, &st) < 0)
 		{
@@ -743,6 +740,9 @@ main(int argc, char *argv[])
 		{"max-rate", required_argument, NULL, 1},
 		{"verbose", no_argument, NULL, 'v'},
 		{"debug", no_argument, NULL, 2},
+#if PG_VERSION_NUM >= 170000
+		{"sync-method", required_argument, NULL, 3},
+#endif
 		{NULL, 0, NULL, 0}
 	};
 
@@ -770,7 +770,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "abcD:def:NPv", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "abcdD:ef:NPv", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -786,6 +786,9 @@ main(int argc, char *argv[])
 			case 'd':
 				mode = PG_MODE_DISABLE;
 				break;
+			case 'D':
+				DataDir = optarg;
+				break;
 			case 'e':
 				mode = PG_MODE_ENABLE;
 				break;
@@ -800,14 +803,11 @@ main(int argc, char *argv[])
 			case 'N':
 				do_sync = false;
 				break;
-			case 'v':
-				verbose = true;
-				break;
-			case 'D':
-				DataDir = optarg;
-				break;
 			case 'P':
 				showprogress = true;
+				break;
+			case 'v':
+				verbose = true;
 				break;
 			case 1:
 				if (atof(optarg) == 0)
@@ -822,7 +822,14 @@ main(int argc, char *argv[])
 				debug = true;
 				verbose = true;
 				break;
+#if PG_VERSION_NUM >= 170000
+			case 3:
+				if (!parse_sync_method(optarg, &sync_method))
+					exit(1);
+				break;
+#endif
 			default:
+				/* getopt_long already emitted a complaint */
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 				exit(1);
 		}
@@ -992,16 +999,16 @@ main(int argc, char *argv[])
 		}
 
 		printf(_("Checksum operation completed\n"));
-		printf(_("Files scanned:  %s\n"), psprintf(INT64_FORMAT, files_scanned));
+		printf(_("Files scanned:  %lld\n"), (long long) files_scanned);
 		if (skippedfiles > 0)
-			printf(_("Files skipped:  %s\n"), psprintf(INT64_FORMAT, skippedfiles));
-		printf(_("Blocks scanned: %s\n"), psprintf(INT64_FORMAT, blocks_scanned));
+			printf(_("Files skipped:  %lld\n"), (long long) skippedfiles);
+		printf(_("Blocks scanned: %lld\n"), (long long) blocks_scanned);
 		if (skippedblocks > 0)
-			printf(_("Blocks skipped: %s\n"), psprintf(INT64_FORMAT, skippedblocks));;
+			printf(_("Blocks skipped: %lld\n"), (long long) skippedblocks);
 
 		if (mode == PG_MODE_CHECK)
 		{
-			printf(_("Bad checksums:  %s\n"), psprintf(INT64_FORMAT, badblocks));
+			printf(_("Bad checksums:  %lld\n"), (long long) badblocks);
 			printf(_("Data checksum version: %u\n"), ControlFile->data_checksum_version);
 
 			if (badblocks > 0)
@@ -1014,8 +1021,8 @@ main(int argc, char *argv[])
 		}
 		else if (mode == PG_MODE_ENABLE)
 		{
-			printf(_("Files written:  %s\n"), psprintf(INT64_FORMAT, files_written));
-			printf(_("Blocks written: %s\n"), psprintf(INT64_FORMAT, blocks_written));
+			printf(_("Files written:  %lld\n"), (long long) files_written);
+			printf(_("Blocks written: %lld\n"), (long long) blocks_written);
 		}
 	}
 

@@ -3,7 +3,7 @@
  *
  * Verifies/enables/disables data checksums
  *
- *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2024, PostgreSQL Global Development Group
  *
  *	port.h
  */
@@ -35,6 +35,9 @@ extern char *optarg;
 #if PG_VERSION_NUM >= 120000 
 #include "common/logging.h" 
 #endif 
+#if PG_VERSION_NUM >= 140000
+#include "fe_utils/option_utils.h"
+#endif
 
 #if PG_VERSION_NUM < 100000
 #define PG_CONTROL_FILE_SIZE PG_CONTROL_SIZE
@@ -47,6 +50,18 @@ extern char *optarg;
 #define INT64_MODIFIER "l"
 
 #define pg_attribute_printf(f,a) __attribute__((format(PG_PRINTF_ATTRIBUTE, f, a)))
+#endif
+
+#if PG_VERSION_NUM < 170000
+/*
+ * Filename components.
+ *
+ * XXX: fd.h is not declared here as frontend side code is not able to
+ * interact with the backend-side definitions for the various fsync
+ * wrappers.
+ */
+#define PG_TEMP_FILES_DIR "pgsql_tmp"
+#define PG_TEMP_FILE_PREFIX "pgsql_tmp"
 #endif
 
 #if PG_VERSION_NUM <  90600
@@ -106,6 +121,11 @@ void walkdir(const char *path,
 		int (*action) (const char *fname, bool isdir, const char *progname),
 		bool process_symlinks, const char *progname);
 void fsync_pgdata(const char *pg_data, const char *progname, int serverVersion);
+#endif
+
+#if PG_VERSION_NUM >=  170000
+extern bool parse_sync_method(const char *optarg,
+			      DataDirSyncMethod *sync_method);
 #endif
 
 #if PG_VERSION_NUM < 120000

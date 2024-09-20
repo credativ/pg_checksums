@@ -3,7 +3,7 @@
  *
  * Verifies/enables/disables data checksums
  *
- *	Copyright (c) 2010-2022, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2024, PostgreSQL Global Development Group
  *
  *	port.c
  */
@@ -593,3 +593,32 @@ CheckDataVersion(char *DataDir)
 
 	fclose(ver_fd);
 }
+
+#if PG_VERSION_NUM >= 170000
+/*
+ * Provide strictly harmonized handling of the --sync-method option.
+ */
+bool
+parse_sync_method(const char *optarg, DataDirSyncMethod *sync_method)
+{
+        if (strcmp(optarg, "fsync") == 0)
+                *sync_method = DATA_DIR_SYNC_METHOD_FSYNC;
+        else if (strcmp(optarg, "syncfs") == 0)
+        {
+#ifdef HAVE_SYNCFS
+                *sync_method = DATA_DIR_SYNC_METHOD_SYNCFS;
+#else
+                pg_log_error("this build does not support sync method \"%s\"",
+                                         "syncfs");
+                return false;
+#endif
+        }
+        else
+        {
+                pg_log_error("unrecognized sync method: %s", optarg);
+                return false;
+        }
+
+        return true;
+}
+#endif /* PG_VERSION_NUM >= 170000 */
