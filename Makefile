@@ -20,7 +20,7 @@ PGXS = $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 
 # avoid linking against all libs that the server links against (xml, selinux, ...)
-LIBS = $(libpq_pgport)
+LIBS = -L$(shell $(PG_CONFIG) --pkglibdir) -lpgcommon -lpgport -L$(shell $(PG_CONFIG) --libdir)
 
 PROVE_FLAGS += -I./t/perl
 
