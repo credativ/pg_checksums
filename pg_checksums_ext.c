@@ -25,14 +25,15 @@
 #include <unistd.h>
 
 #include "catalog/pg_control.h"
+#include "common/controldata_utils.h"
+#include "common/file_perm.h"
+#include "common/file_utils.h"
+#include "common/relpath.h"
+#include "pg_getopt.h"
 #include "portability/instr_time.h"
 #include "storage/bufpage.h"
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
-
-#if PG_VERSION_NUM <= 110000
-#include "catalog/catalog.h"
-#endif
 
 static int64 files_scanned = 0;
 static int64 files_written = 0;
@@ -134,8 +135,6 @@ static const struct exclude_list_item skip[] = {
 static void
 update_checkpoint_lsn(void)
 {
-
-#if PG_VERSION_NUM >= 100000
 	bool	crc_ok;
 
 #if PG_VERSION_NUM >= 120000
@@ -148,11 +147,6 @@ update_checkpoint_lsn(void)
 		pg_log_error("pg_control CRC value is incorrect");
 		exit(1);
 	}
-#elif PG_VERSION_NUM >= 90600
-	ControlFile = get_controlfile(DataDir, progname);
-#else
-	ControlFile = getControlFile(DataDir);
-#endif
 
 	/* Update checkpointLSN with the current value */
 	checkpointLSN = ControlFile->checkPoint;
@@ -748,9 +742,7 @@ main(int argc, char *argv[])
 
 	int			c;
 	int			option_index;
-#if PG_VERSION_NUM >= 100000
 	bool		crc_ok;
-#endif
 
 	pg_logging_init(argv[0]);
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums_ext"));
@@ -874,7 +866,6 @@ main(int argc, char *argv[])
 	CheckDataVersion(DataDir);
 
 	/* Read the control file and check compatibility */
-#if PG_VERSION_NUM >= 100000
 #if PG_VERSION_NUM >= 120000
 	ControlFile = get_controlfile(DataDir, &crc_ok);
 #else
@@ -885,11 +876,6 @@ main(int argc, char *argv[])
 		pg_log_error("pg_control CRC value is incorrect");
 		exit(1);
 	}
-#elif PG_VERSION_NUM >= 90600
-	ControlFile = get_controlfile(DataDir, progname);
-#else
-	ControlFile = getControlFile(DataDir);
-#endif
 
 	if (ControlFile->pg_control_version != PG_CONTROL_VERSION)
 	{
