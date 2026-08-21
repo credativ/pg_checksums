@@ -151,8 +151,9 @@ update_checkpoint_lsn(void)
 }
 
 static void
-toggle_progress_report(int signum)
+toggle_progress_report(SIGNAL_ARGS)
 {
+	int			signum = postgres_signal_arg;
 
 	/* we handle SIGUSR1 only, and toggle the value of showprogress */
 	if (signum == SIGUSR1)
@@ -739,6 +740,9 @@ main(int argc, char *argv[])
 	bool		crc_ok;
 
 	pg_logging_init(argv[0]);
+#if PG_VERSION_NUM >= 190000
+	pg_initialize_timing();
+#endif
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_checksums_ext"));
 	progname = get_progname(argv[0]);
 
